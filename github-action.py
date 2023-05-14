@@ -690,10 +690,6 @@ class AutoActionTemplate(BaseAutoAction):
                 )
                 return
 
-        release_status = _check_release_status_for_template(
-            config=self.config, manager=self.manager, templates=self.templates
-        )
-
         with timeout(self.timeout):
             stage = "build"
             try:
