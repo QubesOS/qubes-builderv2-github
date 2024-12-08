@@ -72,6 +72,8 @@ from qubesbuilder.pluginmanager import PluginManager
 
 from urllib.parse import urljoin
 
+from utils.notify_issues import NotifyIssueCli, NotifyIssueError
+
 PROJECT_PATH = Path(__file__).resolve().parent
 
 init_logger(verbose=True)
@@ -134,6 +136,7 @@ class BaseAutoAction(ABC):
         repository_publish=None,
         local_log_file=None,
         dry_run=False,
+        source_dir=None,
     ):
         self.builder_dir = Path(builder_dir).resolve()
         self.state_dir = Path(state_dir).resolve()
@@ -167,6 +170,20 @@ class BaseAutoAction(ABC):
                 "GITHUB_API_KEY": self.api_key,
                 "GITHUB_BUILD_REPORT_REPO": self.build_report_repo,
             }
+        )
+
+        self.source_dir = source_dir
+
+        notify_cli_kwargs = {
+            "release_name": self.qubes_release,
+            "source_dir": self.source_dir,
+            "github_report_repo_name": self.build_report_repo,
+            "message_templates_dir": PROJECT_PATH / "templates",
+            "min_age_days": self.config.get("min-age-days", 5),
+        }
+
+        self.notify_cli = NotifyIssueCli(
+            token=self.api_key, **notify_cli_kwargs
         )
 
     def get_build_log_url(self, log_file):
@@ -250,17 +267,18 @@ class BaseAutoAction(ABC):
     def notify_build_status_on_timeout(self):
         pass
 
-    def notify_github(self, notify_issues_cmd, build_target, env):
+    def notify_github(self, cli_run_kwargs, build_target):
         if not self.api_key:
-            log.debug(f"API key not set, not calling cmd: {notify_issues_cmd}")
+            log.debug(
+                f"API key not set, not calling notify CLI: {cli_run_kwargs}"
+            )
             return
         try:
             if self.dry_run:
-                log.debug(f"[DRY-RUN] cmd: {notify_issues_cmd}")
-                log.debug(f"[DRY-RUN] env: {env}")
+                log.debug(f"[DRY-RUN] kwargs: {cli_run_kwargs}")
             else:
-                subprocess.run(notify_issues_cmd, env=env)
-        except subprocess.CalledProcessError as e:
+                self.notify_cli.run(**cli_run_kwargs)
+        except NotifyIssueError as e:
             msg = f"{build_target}: Failed to notify GitHub: {str(e)}"
             log.error(msg)
 
@@ -286,6 +304,7 @@ class AutoAction(BaseAutoAction):
             repository_publish=repository_publish,
             local_log_file=local_log_file,
             dry_run=dry_run,
+            source_dir=component.source_dir,
         )
 
         self.component = component
@@ -340,50 +359,23 @@ class AutoAction(BaseAutoAction):
     def notify_build_status(
         self, dist, status, stage="build", log_file=None, additional_info=None
     ):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--days={self.config.get('min-age-days', 5)}",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
-
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
-        notify_issues_cmd += [
-            stage,
-            self.qubes_release,
-            str(self.component.source_dir),
-            self.component.name,
-            dist.distribution,
-            status,
-        ]
+        cli_run_kwargs = {
+            "command": stage,
+            "dist": dist,
+            "package_name": self.component.name,
+            "additional_info": additional_info,
+            "build_status": status,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+        }
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
+            cli_run_kwargs=cli_run_kwargs,
             build_target=f"{self.component.name}:{dist}",
-            env=self.env,
         )
 
     def notify_upload_status(self, dist, log_file=None, additional_info=None):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--days={self.config.get('min-age-days', 5)}",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
-
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
         state_file = (
             self.state_dir
             / f"{self.qubes_release}-{self.component.name}-{dist.package_set}-{dist.name}-{self.repository_publish}"
@@ -394,21 +386,23 @@ class AutoAction(BaseAutoAction):
             / f"{self.qubes_release}-{self.component.name}-{dist.package_set}-{dist.name}-current"
             # type: ignore
         )
-        notify_issues_cmd += [
-            "upload",
-            self.qubes_release,
-            str(self.component.source_dir),
-            self.component.name,
-            dist.distribution,
-            str(self.repository_publish),
-            str(state_file),
-            str(stable_state_file),
-        ]
+
+        cli_run_kwargs = {
+            "command": "upload",
+            "dist": dist,
+            "package_name": self.component.name,
+            "repository_type": self.repository_publish,
+            "additional_info": additional_info,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+            "state_file": state_file,
+            "stable_state_file": stable_state_file,
+        }
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
+            cli_run_kwargs=cli_run_kwargs,
             build_target=f"{self.component.name}:{dist}",
-            env=self.env,
         )
 
     def display_head_info(self, args):
@@ -585,6 +579,7 @@ class AutoActionTemplate(BaseAutoAction):
             repository_publish=repository_publish,
             local_log_file=local_log_file,
             dry_run=dry_run,
+            source_dir=builder_dir,
         )
 
         try:
@@ -593,6 +588,9 @@ class AutoActionTemplate(BaseAutoAction):
             raise AutoActionError(f"No such template '{template_name}'.") from e
         self.template_timestamp = template_timestamp
         self.template_version = self.config.qubes_release.lstrip("r") + ".0"
+
+        self.template = self.templates[0]
+        self.package_name = f"qubes-template-{self.template.name}-{self.template_version}-{self.template_timestamp}"
 
         self.repository_publish = repository_publish or self.config.get(
             "repository-publish", {}
@@ -637,81 +635,50 @@ class AutoActionTemplate(BaseAutoAction):
     def notify_build_status(
         self, status, stage="build", log_file=None, additional_info=None
     ):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--days={self.config.get('min-age-days', 5)}",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
 
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
-        template = self.templates[0]
-        package_name = f"qubes-template-{template.name}-{self.template_version}-{self.template_timestamp}"
-
-        notify_issues_cmd += [
-            stage,
-            self.qubes_release,
-            str(self.builder_dir),
-            package_name,
-            template.distribution.distribution,
-            status,
-        ]
+        cli_run_kwargs = {
+            "command": stage,
+            "dist": self.template.distribution,
+            "package_name": self.package_name,
+            "build_status": status,
+            "additional_info": additional_info,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+        }
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
-            build_target=template,
-            env=self.env,
+            cli_run_kwargs=cli_run_kwargs, build_target=self.template
         )
 
     def notify_upload_status(self, log_file=None, additional_info=None):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--days={self.config.get('min-age-days', 5)}",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
-
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
-        template = self.templates[0]
-        package_name = f"qubes-template-{template.name}-{self.template_version}-{self.template_timestamp}"
-
         state_file = (
             self.state_dir
-            / f"{self.qubes_release}-template-vm-{template.distribution.name}-{self.repository_publish}"
+            / f"{self.qubes_release}-template-vm-{self.template.distribution.name}-{self.repository_publish}"
             # type: ignore
         )
         stable_state_file = (
             self.state_dir
-            / f"{self.qubes_release}-template-vm-{template.distribution.name}-current"
+            / f"{self.qubes_release}-template-vm-{self.template.distribution.name}-current"
             # type: ignore
         )
-        notify_issues_cmd += [
-            "upload",
-            self.qubes_release,
-            str(self.builder_dir),
-            package_name,
-            template.distribution.distribution,
-            str(self.repository_publish),
-            str(state_file),
-            str(stable_state_file),
-        ]
+
+        cli_run_kwargs = {
+            "command": "upload",
+            "dist": self.template.distribution,
+            "package_name": self.package_name,
+            "repository_type": self.repository_publish,
+            "additional_info": additional_info,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+            "state_file": state_file,
+            "stable_state_file": stable_state_file,
+        }
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
-            build_target=template,
-            env=self.env,
+            cli_run_kwargs=cli_run_kwargs,
+            build_target=self.template,
         )
 
     def build(self):
@@ -851,6 +818,7 @@ class AutoActionISO(BaseAutoAction):
             repository_publish=repository_publish,
             local_log_file=local_log_file,
             dry_run=dry_run,
+            source_dir=builder_dir,
         )
 
         self.timeout = self.config.get("timeout", 21600)
@@ -881,7 +849,6 @@ class AutoActionISO(BaseAutoAction):
             raise AutoActionError(
                 f"None or more than one host distribution in builder configuration file!"
             )
-        self.dist = host_distributions[0]
         self.iso_version = self.commit_sha
         self.iso_base_url = self.config.get("github", {}).get(
             "iso-base-url", None
@@ -893,6 +860,9 @@ class AutoActionISO(BaseAutoAction):
             raise AutoActionError(
                 f"No remote host configured in builder configuration file!"
             )
+
+        self.dist = host_distributions[0]
+        self.package_name = f"iso-{self.dist.name}-{self.iso_version}"
 
     def run_stages(self, stages):
         for stage in stages:
@@ -909,52 +879,23 @@ class AutoActionISO(BaseAutoAction):
     def notify_build_status(
         self, status, stage="build", log_file=None, additional_info=None
     ):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
-
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
-        package_name = f"iso-{self.dist.name}-{self.iso_version}"
-
-        notify_issues_cmd += [
-            stage,
-            self.qubes_release,
-            str(self.builder_dir),
-            package_name,
-            self.dist.distribution,
-            status,
-        ]
+        cli_run_kwargs = {
+            "command": stage,
+            "dist": self.dist,
+            "package_name": self.package_name,
+            "additional_info": additional_info,
+            "build_status": status,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+        }
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
-            build_target=package_name,
-            env=self.env,
+            cli_run_kwargs=cli_run_kwargs,
+            build_target=self.package_name,
         )
 
     def notify_upload_status(self, log_file=None, additional_info=None):
-        notify_issues_cmd = [
-            f"{str(PROJECT_PATH)}/utils/notify-issues",
-            f"--message-templates-dir={str(PROJECT_PATH)}/templates",
-        ]
-
-        if log_file:
-            notify_issues_cmd += [
-                f"--build-log={self.get_build_log_url(log_file=log_file)}"
-            ]
-
-        if additional_info:
-            notify_issues_cmd += [f"--additional-info={str(additional_info)}"]
-
-        package_name = f"iso-{self.dist.name}-{self.iso_version}"
-
         state_file = (
             self.state_dir
             / f"{self.qubes_release}-iso-{self.dist.name}"
@@ -965,26 +906,28 @@ class AutoActionISO(BaseAutoAction):
             / f"{self.qubes_release}-iso-{self.dist.name}-current"
             # type: ignore
         )
-        notify_issues_cmd += [
-            "upload",
-            self.qubes_release,
-            str(self.builder_dir),
-            package_name,
-            self.dist.distribution,
-            str(self.repository_publish),
-            str(state_file),
-            str(stable_state_file),
-        ]
+
+        cli_run_kwargs = {
+            "command": "upload",
+            "dist": self.dist,
+            "package_name": self.package_name,
+            "repository_type": self.repository_publish,
+            "additional_info": additional_info,
+            "build_log": (
+                self.get_build_log_url(log_file=log_file) if log_file else None
+            ),
+            "state_file": state_file,
+            "stable_state_file": stable_state_file,
+        }
+
         if self.iso_base_url:
-            notify_issues_cmd += [
-                "--repository-url",
-                f"{urljoin(self.iso_base_url, self.repository_publish)}/",
-            ]
+            cli_run_kwargs["repository_url"] = (
+                f"{urljoin(self.iso_base_url, self.repository_publish)}/"
+            )
 
         self.notify_github(
-            notify_issues_cmd=notify_issues_cmd,
-            build_target=package_name,
-            env=self.env,
+            cli_run_kwargs=cli_run_kwargs,
+            build_target=self.package_name,
         )
 
     def trigger_openqa(self):
@@ -1106,7 +1049,7 @@ def main():
     )
     parser.add_argument("--dry-run", action="store_true", default=False)
     parser.add_argument(
-        "--state-dir", default=Path.home() / "github-notify-state"
+        "--state-dir", default=Path.home() / "github-notify-state", type=Path
     )
     parser.add_argument(
         "--local-log-file",
@@ -1118,14 +1061,14 @@ def main():
     # build component parser
     build_component_parser = subparsers.add_parser("build-component")
     build_component_parser.set_defaults(command="build-component")
-    build_component_parser.add_argument("builder_dir")
+    build_component_parser.add_argument("builder_dir", type=Path)
     build_component_parser.add_argument("builder_conf")
     build_component_parser.add_argument("component_name")
 
     # upload component parser
     upload_component_parser = subparsers.add_parser("upload-component")
     upload_component_parser.set_defaults(command="upload-component")
-    upload_component_parser.add_argument("builder_dir")
+    upload_component_parser.add_argument("builder_dir", type=Path)
     upload_component_parser.add_argument("builder_conf")
     upload_component_parser.add_argument("component_name")
     upload_component_parser.add_argument("commit_sha")
@@ -1137,7 +1080,7 @@ def main():
     # build template parser
     build_template_parser = subparsers.add_parser("build-template")
     build_template_parser.set_defaults(command="build-template")
-    build_template_parser.add_argument("builder_dir")
+    build_template_parser.add_argument("builder_dir", type=Path)
     build_template_parser.add_argument("builder_conf")
     build_template_parser.add_argument("template_name")
     build_template_parser.add_argument("template_timestamp")
@@ -1145,7 +1088,7 @@ def main():
     # upload template parser
     template_parser = subparsers.add_parser("upload-template")
     template_parser.set_defaults(command="upload-template")
-    template_parser.add_argument("builder_dir")
+    template_parser.add_argument("builder_dir", type=Path)
     template_parser.add_argument("builder_conf")
     template_parser.add_argument("template_name")
     template_parser.add_argument("template_sha")
@@ -1154,7 +1097,7 @@ def main():
     # build iso parser
     build_iso_parser = subparsers.add_parser("build-iso")
     build_iso_parser.set_defaults(command="build-iso")
-    build_iso_parser.add_argument("builder_dir")
+    build_iso_parser.add_argument("builder_dir", type=Path)
     build_iso_parser.add_argument("builder_conf")
     build_iso_parser.add_argument("iso_version")
     build_iso_parser.add_argument("iso_timestamp")

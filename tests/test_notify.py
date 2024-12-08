@@ -25,7 +25,7 @@ def test_notify_00_template_build_success_upload(
 
     status = "building"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -68,7 +68,7 @@ For more information on how to test this update, please take a look at https://w
     #
     status = "built"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -86,7 +86,7 @@ For more information on how to test this update, please take a look at https://w
     #
     upload_repository = "templates-itl-testing"
     cmd = [
-        PROJECT_PATH / "utils/notify-issues",
+        PROJECT_PATH / "utils/notify_issues.py",
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -135,7 +135,7 @@ def test_notify_01_template_build_failure(token, github_repository, workdir):
 
     status = "building"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -157,7 +157,7 @@ def test_notify_01_template_build_failure(token, github_repository, workdir):
 
     status = "failed"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -199,7 +199,7 @@ def test_notify_02_iso_build_success_upload(token, github_repository, workdir):
 
     status = "building"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -236,7 +236,7 @@ For more information on how to test this update, please take a look at https://w
 
     status = "built"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -254,7 +254,7 @@ For more information on how to test this update, please take a look at https://w
     #
     upload_repository = "iso-testing"
     cmd = [
-        PROJECT_PATH / "utils/notify-issues",
+        PROJECT_PATH / "utils/notify_issues.py",
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -301,7 +301,7 @@ def test_notify_03_iso_build_failure(token, github_repository, workdir):
 
     status = "building"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -323,7 +323,7 @@ def test_notify_03_iso_build_failure(token, github_repository, workdir):
 
     status = "failed"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -381,7 +381,7 @@ def test_notify_04_component_build_success_upload(
 
     status = "building"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -451,7 +451,7 @@ For more information on how to test this update, please take a look at https://w
     #
     status = "built"
     cmd = [
-        str(PROJECT_PATH / "utils/notify-issues"),
+        str(PROJECT_PATH / "utils/notify_issues.py"),
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
@@ -472,7 +472,7 @@ For more information on how to test this update, please take a look at https://w
     #
     upload_repository = "current-testing"
     cmd = [
-        PROJECT_PATH / "utils/notify-issues",
+        PROJECT_PATH / "utils/notify_issues.py",
         f"--build-log={build_log}",
         f"--message-templates-dir={PROJECT_PATH}/templates",
         f"--github-report-repo-name={github_repository.full_name}",
