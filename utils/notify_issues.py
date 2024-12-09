@@ -28,6 +28,7 @@ import subprocess
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
+from typing import Optional
 
 from github import Github, GithubException
 
@@ -41,7 +42,8 @@ github_repo_prefix = "QubesOS/qubes-"
 github_baseurl = "https://github.com"
 
 fixes_re = re.compile(
-    r"(fixes|closes)( (https://github.com/[^ ]+/|" r"QubesOS/Qubes-issues#)[0-9]+)",
+    r"(fixes|closes)( (https://github.com/[^ ]+/|"
+    r"QubesOS/Qubes-issues#)[0-9]+)",
     re.IGNORECASE,
 )
 issue_re = re.compile(r"QubesOS/Qubes-issues(#|/issues/)[0-9]+", re.IGNORECASE)
@@ -59,33 +61,99 @@ class NotifyIssueCli:
         self,
         token: str,
         release_name: str,
-        src_dir: Path,
-        package_name: str,
-        dist: QubesDistribution,
+        source_dir: Path,
         message_templates_dir: Path,
         github_report_repo_name: str,
         min_age_days: int,
     ):
         self.token = token
         self.release_name = release_name
-        self.src_dir = src_dir
-        self.package_name = package_name
-        self.dist = dist
+        self.source_dir = source_dir
         self.message_templates_dir = message_templates_dir
         self.github_report_repo_name = github_report_repo_name
         self.min_age_days = min_age_days
         self.gi = Github(self.token)
 
+    def get_labels(
+        self, command, repository_type, build_status, dist_label, package_name
+    ):
+        if package_name.startswith("iso") or package_name.startswith(
+            "qubes-template"
+        ):
+            prefix_label = f"{self.release_name}"
+        else:
+            prefix_label = f"{self.release_name}-{dist_label}"
+
+        add_labels = []
+        if command == "upload":
+            delete_labels = [
+                f"{prefix_label}-failed",
+                f"{prefix_label}-building",
+            ]
+            if repository_type == "current":
+                delete_labels += [
+                    f"{prefix_label}-cur-test",
+                    f"{prefix_label}-sec-test",
+                ]
+                add_labels = [f"{prefix_label}-stable"]
+            elif repository_type == "current-testing":
+                add_labels = [f"{prefix_label}-cur-test"]
+            elif repository_type == "security-testing":
+                add_labels = [f"{prefix_label}-sec-test"]
+            elif repository_type == "templates-itl":
+                delete_labels += [f"{self.release_name}-testing"]
+                add_labels = [f"{self.release_name}-stable"]
+            elif repository_type == "templates-itl-testing":
+                add_labels += [f"{self.release_name}-testing"]
+            elif repository_type == "templates-community":
+                delete_labels += [f"{self.release_name}-testing", "iso"]
+                add_labels = [f"{self.release_name}-stable"]
+            elif repository_type in (
+                "templates-community-testing",
+                "iso-testing",
+            ):
+                add_labels = [f"{self.release_name}-testing"]
+            else:
+                log.warning(f"Ignoring {repository_type}")
+                return [], []
+        else:
+            if build_status == "failed":
+                add_labels = [f"{prefix_label}-failed"]
+                delete_labels = [f"{prefix_label}-building"]
+            elif build_status == "building":
+                add_labels = [f"{prefix_label}-building"]
+                # we ensure that we don't keep those labels in case of previous failures
+                delete_labels = [f"{prefix_label}-failed"]
+            elif build_status == "built":
+                delete_labels = [
+                    f"{prefix_label}-failed",
+                    f"{prefix_label}-building",
+                ]
+            else:
+                delete_labels = []
+
+        return add_labels, delete_labels
+
     def get_current_commit(self):
         git_proc = subprocess.Popen(
-            ["git", "-C", str(self.src_dir), "log", "-n", "1", "--pretty=format:%H"],
+            [
+                "git",
+                "-C",
+                str(self.source_dir),
+                "log",
+                "-n",
+                "1",
+                "--pretty=format:%H",
+            ],
             stdout=subprocess.PIPE,
         )
-        (current_commit, _) = git_proc.communicate()
-        current_commit = current_commit.decode().strip()
+        (b_current_commit, _) = git_proc.communicate()
+        current_commit = b_current_commit.decode().strip()
         return current_commit
 
-    def get_package_changes(self, git_url, commit_sha, previous_commit_sha=None):
+    def get_package_changes(
+        self, git_url, current_commit, previous_current_commit=None
+    ):
         """Returns a tuple of:
         - current version
         - previous version
@@ -93,7 +161,15 @@ class NotifyIssueCli:
         - referenced GitHub issues, in GitHub syntax
         """
         git_proc = subprocess.Popen(
-            ["git", "-C", str(self.src_dir), "tag", "--list", "--points-at=HEAD", "v*"],
+            [
+                "git",
+                "-C",
+                str(self.source_dir),
+                "tag",
+                "--list",
+                "--points-at=HEAD",
+                "v*",
+            ],
             stdout=subprocess.PIPE,
         )
         (version_tags, _) = git_proc.communicate()
@@ -103,35 +179,35 @@ class NotifyIssueCli:
         version = versions[0]
 
         # get previous version
-        if previous_commit_sha:
+        if previous_current_commit:
             git_proc = subprocess.Popen(
                 [
                     "git",
                     "-C",
-                    str(self.src_dir),
+                    str(self.source_dir),
                     "describe",
                     "--match",
                     "v*",
                     "--exact-match",
-                    previous_commit_sha,
+                    previous_current_commit,
                 ],
                 stdout=subprocess.PIPE,
             )
             (version_tags, _) = git_proc.communicate()
             if not version_tags:
                 # if no tag there, point at the commit directly
-                version_tags = previous_commit_sha.encode()
+                version_tags = previous_current_commit.encode()
         else:
             git_proc = subprocess.Popen(
                 [
                     "git",
                     "-C",
-                    str(self.src_dir),
+                    str(self.source_dir),
                     "describe",
                     "--match",
                     "v*",
                     "--abbrev=0",
-                    commit_sha + "~",
+                    current_commit + "~",
                 ],
                 stdout=subprocess.PIPE,
             )
@@ -142,10 +218,10 @@ class NotifyIssueCli:
                 [
                     "git",
                     "-C",
-                    str(self.src_dir),
+                    str(self.source_dir),
                     "rev-list",
                     "--max-parents=0",
-                    commit_sha + "~",
+                    current_commit + "~",
                 ],
                 stdout=subprocess.PIPE,
             )
@@ -160,15 +236,15 @@ class NotifyIssueCli:
             [
                 "git",
                 "-C",
-                str(self.src_dir),
+                str(self.source_dir),
                 "log",
                 "{}..{}".format(previous_version, version),
             ],
             stdout=subprocess.PIPE,
         )
 
-        (git_log, _) = git_log_proc.communicate()
-        git_log = git_log.decode()
+        (b_git_log, _) = git_log_proc.communicate()
+        git_log = b_git_log.decode()
         referenced_issues = []
         for line in git_log.splitlines():
             match = issue_re.search(line)
@@ -189,20 +265,25 @@ class NotifyIssueCli:
             [
                 "git",
                 "-C",
-                str(self.src_dir),
+                str(self.source_dir),
                 "log",
                 "--pretty=format:{}@%h %s".format(github_full_repo_name),
                 "{}..{}".format(previous_version, version),
             ],
             stdout=subprocess.PIPE,
         )
-        (shortlog, _) = git_log_proc.communicate()
-        shortlog = shortlog.decode()
+        (b_shortlog, _) = git_log_proc.communicate()
+        shortlog = b_shortlog.decode()
 
         return version, previous_version, shortlog, referenced_issues_txt
 
     def search_or_create_issue(
-        self, release, component, version, create=True, message_template_kwargs=None
+        self,
+        release,
+        component,
+        version,
+        create=True,
+        message_template_kwargs=None,
     ):
         try:
             github_repo = self.gi.get_repo(self.github_report_repo_name)
@@ -256,7 +337,9 @@ class NotifyIssueCli:
                     message = message.replace(key, value)
 
             try:
-                issue = github_repo.create_issue(title=issue_title, body=message)
+                issue = github_repo.create_issue(
+                    title=issue_title, body=message
+                )
                 issue_no = issue.number
             except GithubException as e:
                 log.warning(f"Failed to create issue: {str(e)}")
@@ -301,16 +384,25 @@ class NotifyIssueCli:
                 )
 
     def notify_closed_issues(
-        self, repo_type, current_commit, previous_commit, add_labels, delete_labels
+        self,
+        dist,
+        package_name,
+        repo_type,
+        current_commit,
+        previous_commit,
+        add_labels,
+        delete_labels,
     ):
-        message = f"message-{repo_type}-{self.dist.package_set}"
-        if (self.message_templates_dir / f"{message}-{self.dist.name}").exists():
+        message = f"message-{repo_type}-{dist.package_set}"
+        if (self.message_templates_dir / f"{message}-{dist.name}").exists():
             message_template_path = (
-                self.message_templates_dir / f"{message}-{self.dist.name}"
+                self.message_templates_dir / f"{message}-{dist.name}"
             )
-        elif (self.message_templates_dir / f"{message}-{self.dist.fullname}").exists():
+        elif (
+            self.message_templates_dir / f"{message}-{dist.fullname}"
+        ).exists():
             message_template_path = (
-                self.message_templates_dir / f"{message}-{self.dist.fullname}"
+                self.message_templates_dir / f"{message}-{dist.fullname}"
             )
         else:
             log.warning("Cannot find message template not adding comments")
@@ -320,65 +412,68 @@ class NotifyIssueCli:
             [
                 "git",
                 "-C",
-                str(self.src_dir),
+                str(self.source_dir),
                 "log",
                 "{}..{}".format(previous_commit, current_commit),
             ],
             stdout=subprocess.PIPE,
         )
-        (git_log, _) = git_log_proc.communicate()
+        (b_git_log, _) = git_log_proc.communicate()
         closed_issues = []
-        for line in git_log.decode().splitlines():
+        for line in b_git_log.decode().splitlines():
             match = fixes_re.search(line)
             if match:
                 issues_string = match.group(0)
                 issues_numbers = [
-                    int(cleanup_re.sub("", s)) for s in issues_string.split()[1:]
+                    int(cleanup_re.sub("", s))
+                    for s in issues_string.split()[1:]
                 ]
                 closed_issues.extend(issues_numbers)
 
-        closed_issues = set(closed_issues)
+        closed_issues = set(closed_issues)  # type: ignore
 
         git_log_proc = subprocess.Popen(
             [
                 "git",
                 "-C",
-                str(self.src_dir),
+                str(self.source_dir),
                 "log",
                 "--pretty=format:{}-{}@%h %s".format(
-                    github_repo_prefix, self.src_dir.name
+                    github_repo_prefix, self.source_dir.name
                 ),
                 "{}..{}".format(previous_commit, current_commit),
             ],
             stdout=subprocess.PIPE,
         )
-        (shortlog, _) = git_log_proc.communicate()
-        shortlog = shortlog.decode()
+        (b_shortlog, _) = git_log_proc.communicate()
+        shortlog = b_shortlog.decode()
 
-        git_url_var = "GIT_URL_" + self.src_dir.name.replace("-", "_")
+        git_url_var = "GIT_URL_" + self.source_dir.name.replace("-", "_")
         if git_url_var in os.environ:
             git_url = os.environ[git_url_var]
         else:
             git_url = "{base}/{prefix}{repo}".format(
                 base=github_baseurl,
                 prefix=github_repo_prefix,
-                repo=self.src_dir.name,
+                repo=self.source_dir.name,
             )
         git_log_url = "{git_url}/compare/{prev_commit}...{curr_commit}".format(
-            git_url=git_url, prev_commit=previous_commit, curr_commit=current_commit
+            git_url=git_url,
+            prev_commit=previous_commit,
+            curr_commit=current_commit,
         )
 
-        component = self.src_dir.name
+        component = self.source_dir.name
 
         for issue in closed_issues:
             log.info(f"Adding a comment to issue #{issue}")
             if message_template_path:
-                message = (
+                issue_message: Optional[str] = (
                     open(message_template_path, "r")
                     .read()
-                    .replace("@DIST@", self.dist.name)
-                    .replace("@PACKAGE_SET@", self.dist.package_set)
-                    .replace("@PACKAGE_NAME@", self.package_name)
+                    .replace("@DIST@", dist.name)
+                    .replace("@PACKAGE_SET@", dist.package_set)
+                    .replace("@PACKAGE_NAME@", package_name)
                     .replace("@COMPONENT@", component)
                     .replace("@REPOSITORY@", repo_type)
                     .replace("@RELEASE_NAME@", self.release_name)
@@ -386,67 +481,122 @@ class NotifyIssueCli:
                     .replace("@GIT_LOG_URL@", git_log_url)
                 )
             else:
-                message = None
+                issue_message = None
 
-            self.comment_issue(issue, message, add_labels, delete_labels)
+            self.comment_issue(issue, issue_message, add_labels, delete_labels)
 
-    def notify_build_report(
+    def run(
         self,
-        dist_label,
-        repo_type,
-        add_labels,
-        delete_labels,
-        commit_sha,
-        previous_stable_commit_sha,
+        command,
+        dist,
+        package_name,
+        repository_type=None,
+        repository_url=None,
         build_status=None,
+        state_file=None,
+        stable_state_file=None,
         build_log=None,
         additional_info=None,
-        repository_url=None,
     ):
+        if dist.package_set == "host":
+            dist_label = "host"
+        else:
+            dist_label = dist.distribution
 
-        if self.package_name.startswith("iso"):
+        current_commit = self.get_current_commit()
+        previous_stable_commit = None
+
+        if command == "upload" and repository_type == "current":
+            repository_type = "stable"
+
+        add_labels, delete_labels = self.get_labels(
+            command=command,
+            repository_type=repository_type,
+            build_status=build_status,
+            dist_label=dist_label,
+            package_name=package_name,
+        )
+
+        if command == "upload":
+            build_status = "uploaded"
+            if not state_file.exists():
+                log.warning(
+                    f"{str(state_file)} does not exist, initializing with the current state"
+                )
+                previous_commit = None
+            else:
+                previous_commit = state_file.read_text().strip()
+
+            if previous_commit is not None and repository_type in [
+                "stable",
+                "current-testing",
+            ]:
+                self.notify_closed_issues(
+                    dist,
+                    package_name,
+                    repository_type,
+                    current_commit,
+                    previous_commit,
+                    add_labels,
+                    delete_labels,
+                )
+
+            state_file.write_text(current_commit)
+
+            if stable_state_file.exists():
+                previous_stable_commit = stable_state_file.read_text().strip()
+
+        if package_name.startswith("iso"):
             base_message = f"ISO for {self.release_name}"
             if repository_url:
-                upload_suffix_message = f"[testing]({repository_url}) repository"
+                upload_suffix_message = (
+                    f"[testing]({repository_url}) repository"
+                )
             else:
                 upload_suffix_message = f"testing repository"
-        elif self.package_name.startswith("qubes-template"):
-            base_message = f"Template {self.package_name.replace('qubes-template-', '')}"
-            upload_suffix_message = f"{repo_type} repository"
+        elif package_name.startswith("qubes-template"):
+            base_message = (
+                f"Template {package_name.replace('qubes-template-', '')}"
+            )
+            upload_suffix_message = f"{repository_type} repository"
         else:
             base_message = f"Package for {dist_label}"
-            upload_suffix_message = f"{repo_type} repository"
+            upload_suffix_message = f"{repository_type} repository"
 
         if build_status == "building":
             report_message = None
         elif build_status == "built":
             if build_log:
-                report_message = f"{base_message} was built ([build log]({build_log}))."
-            else:
                 report_message = (
-                    f"{base_message} was built."
+                    f"{base_message} was built ([build log]({build_log}))."
                 )
+            else:
+                report_message = f"{base_message} was built."
             if additional_info:
-                report_message = f"{report_message.rstrip('.')} ({additional_info})."
+                report_message = (
+                    f"{report_message.rstrip('.')} ({additional_info})."
+                )
         elif build_status == "uploaded":
             report_message = (
                 f"{base_message} was uploaded to {upload_suffix_message}."
             )
             if additional_info:
-                report_message = f"{report_message.rstrip('.')} ({additional_info})."
+                report_message = (
+                    f"{report_message.rstrip('.')} ({additional_info})."
+                )
         elif build_status == "failed":
             if build_log:
-                report_message = (
-                    f"{base_message} failed to build ([build log]({build_log}))."
-                )
+                report_message = f"{base_message} failed to build ([build log]({build_log}))."
             else:
                 report_message = f"{base_message} failed to build."
             if additional_info:
-                report_message = f"{report_message.rstrip('.')} ({additional_info})."
+                report_message = (
+                    f"{report_message.rstrip('.')} ({additional_info})."
+                )
         else:
             raise NotifyIssueError(f"Unexpected build status '{build_status}'")
 
-        component = self.src_dir.name
+        component = self.source_dir.name
 
         git_url_var = "GIT_URL_" + component.replace("-", "_")
         if git_url_var in os.environ:
@@ -456,19 +606,19 @@ class NotifyIssueCli:
                 base=github_baseurl, prefix=github_repo_prefix, repo=component
             )
 
-        if self.package_name.startswith("qubes-template"):
+        if package_name.startswith("qubes-template"):
             # qubes-template-fedora-25-4.0.0-201710170053
-            version = "-".join(self.package_name.split("-")[-2:])
-            component = "-".join(self.package_name.split("-")[:-2])
+            version = "-".join(package_name.split("-")[-2:])
+            component = "-".join(package_name.split("-")[:-2])
             template_name = component.replace("qubes-template-", "")
             message_kwargs = {
-                # "@COMMIT_SHA@": commit_sha,
+                # "@COMMIT_SHA@": current_commit,
                 # "@GIT_URL@": git_url,
                 "@TEMPLATE_NAME@": template_name,
                 "@DIST@": os.getenv("DIST_ORIG_ALIAS", "(dist)"),
             }
-        elif self.package_name.startswith("iso"):
-            parsed_package_name = self.package_name.split("-")
+        elif package_name.startswith("iso"):
+            parsed_package_name = package_name.split("-")
             version = parsed_package_name[-1]
             component = "iso"
             message_kwargs = {"@ISO_VERSION@": version}
@@ -480,16 +630,20 @@ class NotifyIssueCli:
                 referenced_issues_txt,
             ) = self.get_package_changes(
                 git_url,
-                commit_sha,
-                previous_commit_sha=previous_stable_commit_sha,
+                current_commit,
+                previous_current_commit=previous_stable_commit,
             )
 
-            git_log_url = "{git_url}/compare/{prev_commit}...{curr_commit}".format(
-                git_url=git_url, prev_commit=previous_version, curr_commit=version
+            git_log_url = (
+                "{git_url}/compare/{prev_commit}...{curr_commit}".format(
+                    git_url=git_url,
+                    prev_commit=previous_version,
+                    curr_commit=version,
+                )
             )
 
             message_kwargs = {
-                "@COMMIT_SHA@": commit_sha,
+                "@COMMIT_SHA@": current_commit,
                 "@GIT_URL@": git_url,
                 "@GIT_LOG@": shortlog,
                 "@GIT_LOG_URL@": git_log_url,
@@ -515,22 +669,34 @@ class NotifyIssueCli:
 
 def add_required_args_to_parser(parser):
     parser.add_argument("release_name", help="Release name (e.g. r4.2)")
-    parser.add_argument("src_dir", help="Component sources path")
+    parser.add_argument("source_dir", help="Component sources path")
     parser.add_argument("package_name", help="Binary package name")
     parser.add_argument(
-        "distribution", help="Qubes OS Distribution name (e.g. host-fc32)"
+        "distribution",
+        help="Qubes OS Distribution name (e.g. host-fc32)",
+        type=QubesDistribution,
     )
 
 
-def main():
+def parse_args():
     epilog = "When state_file doesn't exists, no notify is sent, but the current state is recorded"
 
     parser = ArgumentParser(epilog=epilog)
-    parser.add_argument("--auth-token", help="Github authentication token (OAuth2)")
-    parser.add_argument("--build-log", help="Build log name in build-logs repository")
-    parser.add_argument("--message-templates-dir", help="Message templates directory")
-    parser.add_argument("--github-report-repo-name", help="Github repository to report")
-    parser.add_argument("--additional-info", help="Add additional info on comment")
+    parser.add_argument(
+        "--auth-token", help="Github authentication token (OAuth2)"
+    )
+    parser.add_argument(
+        "--build-log", help="Build log name in build-logs repository"
+    )
+    parser.add_argument(
+        "--message-templates-dir", help="Message templates directory"
+    )
+    parser.add_argument(
+        "--github-report-repo-name", help="Github repository to report"
+    )
+    parser.add_argument(
+        "--additional-info", help="Add additional info on comment"
+    )
     parser.add_argument(
         "--days",
         action="store",
@@ -562,11 +728,14 @@ def main():
         ],
     )
     upload_parser.add_argument(
-        "state_file", help="File to store internal state (previous commit id)"
+        "state_file",
+        help="File to store internal state (previous commit id)",
+        type=Path,
     )
     upload_parser.add_argument(
         "stable_state_file",
         help="File to store internal state (previous commit id of a stable aka current package)",
+        type=Path,
     )
     upload_parser.add_argument(
         "--repository-url",
@@ -580,10 +749,16 @@ def main():
     # Common args
     add_required_args_to_parser(build_parser)
     build_parser.add_argument(
-        "status", help="Build status", choices=["failed", "building", "built", "uploaded"]
+        "status",
+        help="Build status",
+        choices=["failed", "building", "built", "uploaded"],
     )
 
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
 
     token = args.auth_token or os.environ.get("GITHUB_API_KEY")
     github_report_repo_name = args.github_report_repo_name or os.environ.get(
@@ -613,120 +788,29 @@ def main():
         log.error("Cannot find message templates directory.")
         return 1
 
-    dist = QubesDistribution(args.distribution)
-
-    cli = NotifyIssueCli(
-        token=token,
-        release_name=args.release_name,
-        src_dir=Path(args.src_dir).resolve(),
-        package_name=args.package_name,
-        dist=dist,
-        github_report_repo_name=github_report_repo_name,
-        message_templates_dir=message_templates_dir,
-        min_age_days=args.days,
-    )
-
-    if dist.package_set == "host":
-        dist_label = "host"
-    else:
-        dist_label = dist.distribution
-
-    add_labels = []
-    delete_labels = []
-    repo_type = None
-    if args.package_name.startswith("iso") or args.package_name.startswith("qubes-template"):
-        prefix_label = f"{args.release_name}"
-    else:
-        prefix_label = f"{args.release_name}-{dist_label}"
-
-    if args.command == "upload":
-        build_status = "uploaded"
-        repo_type = args.repo_type
-        repository_url = args.repository_url
-        delete_labels = [
-            f"{prefix_label}-failed",
-            f"{prefix_label}-building",
-        ]
-        if args.repo_type == "current":
-            repo_type = "stable"
-            delete_labels += [
-                f"{prefix_label}-cur-test",
-                f"{prefix_label}-sec-test",
-            ]
-            add_labels = [f"{prefix_label}-stable"]
-        elif args.repo_type == "current-testing":
-            add_labels = [f"{prefix_label}-cur-test"]
-        elif args.repo_type == "security-testing":
-            add_labels = [f"{prefix_label}-sec-test"]
-        elif args.repo_type == "templates-itl":
-            delete_labels += [f"{args.release_name}-testing"]
-            add_labels = [f"{args.release_name}-stable"]
-        elif args.repo_type == "templates-itl-testing":
-            add_labels += [f"{args.release_name}-testing"]
-        elif args.repo_type == "templates-community":
-            delete_labels += [f"{args.release_name}-testing", "iso"]
-            add_labels = [f"{args.release_name}-stable"]
-        elif args.repo_type in ("templates-community-testing", "iso-testing"):
-            add_labels = [f"{args.release_name}-testing"]
-        else:
-            log.warning(f"Ignoring {args.repo_type}")
-            return
-    else:
-        repository_url = None
-        build_status = args.status
-        if build_status == "failed":
-            add_labels = [f"{prefix_label}-failed"]
-            delete_labels = [f"{prefix_label}-building"]
-        elif build_status == "building":
-            add_labels = [f"{prefix_label}-building"]
-            # we ensure that we don't keep those labels in case of previous failures
-            delete_labels = [f"{prefix_label}-failed"]
-        elif build_status == "built":
-            delete_labels = [f"{prefix_label}-failed", f"{prefix_label}-building"]
-
-    current_commit = cli.get_current_commit()
-    previous_stable_commit = None
-
     try:
-        if args.command == "upload":
-            if not os.path.exists(args.state_file):
-                log.warning(
-                    f"{args.state_file} does not exist, initializing with the current state"
-                )
-                previous_commit = None
-            else:
-                with open(args.state_file, "r") as f:
-                    previous_commit = f.readline().strip()
-
-            if previous_commit is not None:
-                if repo_type in ["stable", "current-testing"]:
-                    cli.notify_closed_issues(
-                        repo_type,
-                        current_commit,
-                        previous_commit,
-                        add_labels,
-                        delete_labels,
-                    )
-
-            with open(args.state_file, "w") as f:
-                f.write(current_commit)
-
-            if os.path.exists(args.stable_state_file):
-                with open(args.stable_state_file, "r") as f:
-                    previous_stable_commit = f.readline().strip()
-
-        cli.notify_build_report(
-            dist_label=dist_label,
-            repo_type=repo_type,
-            add_labels=add_labels,
-            delete_labels=delete_labels,
-            commit_sha=current_commit,
-            previous_stable_commit_sha=previous_stable_commit,
-            build_status=build_status,
-            build_log=args.build_log,
-            additional_info=args.additional_info,
-            repository_url=repository_url,
+        cli = NotifyIssueCli(
+            token=token,
+            release_name=args.release_name,
+            source_dir=Path(args.source_dir).resolve(),
+            github_report_repo_name=github_report_repo_name,
+            message_templates_dir=message_templates_dir,
+            min_age_days=args.days,
         )
+
+        cli.run(
+            command=args.command,
+            dist=args.distribution,
+            package_name=args.package_name,
+            additional_info=args.additional_info,
+            build_status=getattr(args, "status", None),
+            build_log=getattr(args, "build_log", None),
+            repository_type=getattr(args, "repo_type", None),
+            repository_url=getattr(args, "repository_url", None),
+            state_file=getattr(args, "state_file", None),
+            stable_state_file=getattr(args, "stable_state_file", None),
+        )
+
     except NotifyIssueError as e:
         log.error(str(e))
         return 1

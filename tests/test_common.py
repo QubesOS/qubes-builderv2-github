@@ -25,6 +25,7 @@ def test_qubesbuilder_buildlog(workdir):
         env=env,
     )
     # fixme: find a better way to load/unload module for each future test
+    sys.path.insert(0, str(tmpdir / "qubes-builder-github"))
     sys.path.insert(0, str(tmpdir / "qubes-builderv2"))
 
     github_action_spec = importlib.util.spec_from_file_location(
