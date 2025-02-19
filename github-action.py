@@ -34,7 +34,6 @@ import re
 import signal
 import subprocess
 import sys
-import time
 import traceback
 from abc import abstractmethod, ABC
 from contextlib import contextmanager
@@ -327,7 +326,6 @@ class AutoAction(BaseAutoAction):
             _component_stage(
                 stage_name=stage,
                 config=self.config,
-                manager=self.manager,
                 components=[self.component],
                 distributions=[dist],
             )
@@ -335,7 +333,6 @@ class AutoAction(BaseAutoAction):
     def publish_and_upload(self, repository_publish: str, distributions: List):
         _publish(
             config=self.config,
-            manager=self.manager,
             repository_publish=repository_publish,
             components=[self.component],
             distributions=distributions,
@@ -343,7 +340,6 @@ class AutoAction(BaseAutoAction):
         )
         _upload(
             config=self.config,
-            manager=self.manager,
             repository_publish=repository_publish,
             distributions=distributions,
             templates=[],
@@ -409,7 +405,6 @@ class AutoAction(BaseAutoAction):
         self.make_with_log(
             _component_stage,
             config=self.config,
-            manager=self.manager,
             components=[self.component],
             distributions=self.distributions,
             stage_name="fetch",
@@ -417,7 +412,6 @@ class AutoAction(BaseAutoAction):
         for dist in self.distributions:
             release_status = _check_release_status_for_component(
                 config=self.config,
-                manager=self.manager,
                 components=[self.component],
                 distributions=[dist],
             )
@@ -502,7 +496,6 @@ class AutoAction(BaseAutoAction):
             )
         release_status = _check_release_status_for_component(
             config=self.config,
-            manager=self.manager,
             components=[self.component],
             distributions=self.distributions,
         )
@@ -598,7 +591,6 @@ class AutoActionTemplate(BaseAutoAction):
             _template_stage(
                 stage_name=stage,
                 config=self.config,
-                manager=self.manager,
                 templates=self.templates,
                 template_timestamp=self.template_timestamp,
             )
@@ -606,7 +598,6 @@ class AutoActionTemplate(BaseAutoAction):
     def publish_and_upload(self, repository_publish: str):
         _publish(
             config=self.config,
-            manager=self.manager,
             repository_publish=repository_publish,
             templates=self.templates,
             components=[],
@@ -614,7 +605,6 @@ class AutoActionTemplate(BaseAutoAction):
         )
         _upload(
             config=self.config,
-            manager=self.manager,
             repository_publish=repository_publish,
             templates=self.templates,
             distributions=[],
@@ -850,7 +840,6 @@ class AutoActionISO(BaseAutoAction):
             _installer_stage(
                 stage_name=stage,
                 config=self.config,
-                manager=self.manager,
                 iso_timestamp=self.iso_timestamp,
             )
 
@@ -950,7 +939,6 @@ class AutoActionISO(BaseAutoAction):
                 self.make_with_log(
                     _component_stage,
                     config=self.config,
-                    manager=self.manager,
                     components=self.config.get_components(["qubes-release"]),
                     distributions=[],
                     stage_name="fetch",

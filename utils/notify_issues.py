@@ -96,7 +96,10 @@ class NotifyIssueCli:
                     f"{prefix_label}-cur-test",
                     f"{prefix_label}-sec-test",
                 ]
-                add_labels = [f"{prefix_label}-stable", f"{self.release_name}-stable"]
+                add_labels = [
+                    f"{prefix_label}-stable",
+                    f"{self.release_name}-stable",
+                ]
             elif repository_type == "current-testing":
                 add_labels = [f"{prefix_label}-cur-test"]
             elif repository_type == "security-testing":
