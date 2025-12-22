@@ -30,7 +30,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from typing import Optional
 
-from github import Github, GithubException
+from github import Github, GithubException, Auth
 
 from qubesbuilder.distribution import QubesDistribution
 
@@ -72,7 +72,7 @@ class NotifyIssueCli:
         self.message_templates_dir = message_templates_dir
         self.github_report_repo_name = github_report_repo_name
         self.min_age_days = min_age_days
-        self.gi = Github(self.token)
+        self.gi = Github(auth=Auth.Token(self.token), retry=5, seconds_between_requests=1)
 
     def get_labels(
         self, command, repository_type, build_status, dist_label, package_name
@@ -598,7 +598,7 @@ class NotifyIssueCli:
                 report_message = f"{base_message} failed to {suffix_message}."
             if additional_info:
                 report_message = (
-                    f"{report_message.rstrip('.')} ({additional_info})."
+                    f"{report_message.rstrip('.')}:\n\n{additional_info}"
                 )
         else:
             raise NotifyIssueError(f"Unexpected build status '{build_status}'")

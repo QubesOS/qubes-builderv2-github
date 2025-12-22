@@ -1,6 +1,9 @@
 import asyncio
 import datetime
+import importlib.util
+import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -18,8 +21,31 @@ FEPITRE_FPR = "9FA64B92F95E706BF28E2CA6484010B5CDC576E2"
 TESTUSER_FPR = "632F8C69E01B25C9E0C3ADF2F360C0D259FB650C"
 
 
+def _load_github_action_module(env: dict, project_path: Path, monkeypatch):
+    # Apply env vars to current process (os.environ)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+
+    # Apply PYTHONPATH from env into sys.path (THIS is the key)
+    py_path = env.get("PYTHONPATH")
+    for entry in reversed([p for p in py_path.split(os.pathsep) if p]):
+        # prepend so it wins over site-packages
+        monkeypatch.syspath_prepend(entry)
+
+    # import github-action.py
+    spec = importlib.util.spec_from_file_location(
+        "github_action", str(project_path / "github-action.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def get_labels_and_comments(issue_title, github_repository):
     issue = get_issue(issue_title=issue_title, repository=github_repository)
+    if not issue:
+        return [], []
     labels = [label.name for label in issue.labels]
     comments = set([comment.body for comment in issue.get_comments()])
     return labels, comments
@@ -485,83 +511,6 @@ def test_action_component_upload(workdir):
     _upload_component_check(tmpdir, with_input_proxy=True, with_gui_common=True)
 
 
-# def test_action_component_build_and_upload_host_only(token, github_repository, workdir):
-#     tmpdir, env = workdir
-#     set_conf_options(
-#         tmpdir / "builder.yml",
-#         {
-#             "github": {
-#                 "api-key": token,
-#                 "build-report-repo": github_repository.full_name,
-#             }
-#         },
-#     )
-#
-#     cmd = [
-#         str(PROJECT_PATH / "github-action.py"),
-#         "--local-log-file",
-#         f"{tmpdir}/build-component.log",
-#         "--no-signer-github-command-check",
-#         "build-component",
-#         f"{tmpdir}/qubes-builderv2",
-#         f"{tmpdir}/builder.yml",
-#         "grub2",
-#     ]
-#     subprocess.run(cmd, check=True, env=env, capture_output=True, text=True)
-#
-#     cmd = [
-#         str(PROJECT_PATH / "github-action.py"),
-#         "--local-log-file",
-#         f"{tmpdir}/upload-component.log",
-#         "--no-signer-github-command-check",
-#         "upload-component",
-#         f"{tmpdir}/qubes-builderv2",
-#         f"{tmpdir}/builder.yml",
-#         "grub2",
-#         "2596baff182a035a34d76ec3551464f88f7b6c03",
-#         "security-testing",
-#         "--distribution",
-#         "host-fc37",
-#     ]
-#     subprocess.run(cmd, check=True, env=env, capture_output=True, text=True)
-#
-#     _fix_timestamp_artifacts_path(
-#         tmpdir
-#         / "artifacts/components/grub2/2.06-2/host-fc37/publish/grub2.spec.publish.yml"
-#     )
-#
-#     cmd = [
-#         str(PROJECT_PATH / "github-action.py"),
-#         "--local-log-file",
-#         f"{tmpdir}/upload-component.log",
-#         "--no-signer-github-command-check",
-#         "upload-component",
-#         f"{tmpdir}/qubes-builderv2",
-#         f"{tmpdir}/builder.yml",
-#         "grub2",
-#         "2596baff182a035a34d76ec3551464f88f7b6c03",
-#         "current",
-#         "--distribution",
-#         "all",
-#     ]
-#     subprocess.run(cmd, check=True, env=env, capture_output=True, text=True)
-#
-#     labels, comments = get_labels_and_comments(
-#         "grub2 v2.06-2 (r4.2)", github_repository
-#     )
-#
-#     # Check that labels exist
-#     assert set(labels) == {"r4.2-host-stable"}
-#
-#     # Check that comments exist
-#     assert comments == {
-#         f"Package for host was built ([build log]({tmpdir / 'build-component.log'})).",
-#         "Package for host was uploaded to current-testing repository.",
-#         "Package for host was uploaded to security-testing repository.",
-#         "Package for host was uploaded to stable repository.",
-#     }
-
-
 def test_action_template_build(token, github_repository, workdir):
     tmpdir, env = workdir
     set_conf_options(
@@ -731,3 +680,217 @@ async def test_action_iso_build(token, github_repository, workdir):
         f"ISO for r4.2 was built ([build log]({tmpdir}/build-iso.log)).",
         f"ISO for r4.2 was uploaded to testing repository.",
     }
+
+
+def test_action_component_build_failure_includes_tail(
+    token, github_repository, workdir, monkeypatch
+):
+    tmpdir, env = workdir
+
+    # Load github-action.py as a module
+    github_action = _load_github_action_module(
+        env, tmpdir / "qubes-builder-github", monkeypatch
+    )
+
+    # Configure GitHub credentials used by NotifyIssueCli
+    set_conf_options(
+        tmpdir / "builder.yml",
+        {
+            "github": {
+                "api-key": token,
+                "build-report-repo": github_repository.full_name,
+            }
+        },
+    )
+
+    # Patch _component_stage inside github-action.py
+    real_component_stage = github_action._component_stage
+
+    def failing_component_stage(*args, **kwargs):
+        stages = kwargs.get("stages", [])
+        # Fail only during the actual build pipeline (not fetch), so issue exists and then fails
+        if "fetch" not in stages:
+            raise RuntimeError("injected failure for test")
+        return real_component_stage(*args, **kwargs)
+
+    monkeypatch.setattr(
+        github_action, "_component_stage", failing_component_stage
+    )
+
+    # Prepare argv exactly like the CLI invocation
+    log_path = tmpdir / "build-component.log"
+    argv = [
+        str(PROJECT_PATH / "github-action.py"),
+        "--local-log-file",
+        str(log_path),
+        "--no-signer-github-command-check",
+        "build-component",
+        str(tmpdir / "qubes-builderv2"),
+        str(tmpdir / "builder.yml"),
+        "app-linux-split-gpg",
+    ]
+
+    monkeypatch.setattr(sys, "argv", argv)
+
+    # Run main() directly
+    github_action.main()
+
+    # Validate the resulting GitHub comment contains the tail formatting
+    labels, comments = get_labels_and_comments(
+        "app-linux-split-gpg v2.0.60 (r4.2)", github_repository
+    )
+    joined = "\n".join(comments)
+
+    # These depend on your format_additional_info() output
+    assert "Additional info" in joined
+    assert "Log tail" in joined or "Last 30 log lines" in joined
+    assert "injected failure for test" in joined
+
+
+def _make_popen_shim(project_path: Path, tmp_home: Path):
+    real_popen = subprocess.Popen
+    buildlog_cmd = project_path / "rpc-services/qubesbuilder.BuildLog"
+
+    def popen_shim(args, *popen_args, **popen_kwargs):
+        # match exactly what github-action.py calls
+        if isinstance(args, (list, tuple)) and list(args[:3]) == [
+            "qrexec-client-vm",
+            "dom0",
+            "qubesbuilder.BuildLog",
+        ]:
+            # Ensure BuildLog script has what it expects
+            env = dict(os.environ)
+            env.setdefault("QREXEC_REMOTE_DOMAIN", "testvm")
+            env["HOME"] = str(tmp_home)  # so logs go under tmpdir
+            # optional: isolate any hooks/dirs
+            Path(tmp_home / "QubesIncomingBuildLog").mkdir(
+                parents=True, exist_ok=True
+            )
+
+            popen_kwargs = dict(popen_kwargs)
+            popen_kwargs["env"] = env
+
+            # Run local BuildLog instead of qrexec-client-vm
+            return real_popen(buildlog_cmd, *popen_args, **popen_kwargs)
+
+        return real_popen(args, *popen_args, **popen_kwargs)
+
+    return popen_shim
+
+
+def test_action_component_build_qrexec_log_path(
+    token, github_repository, workdir, monkeypatch
+):
+    tmpdir, env = workdir
+    github_action = _load_github_action_module(
+        env, tmpdir / "qubes-builder-github", monkeypatch
+    )
+
+    set_conf_options(
+        tmpdir / "builder.yml",
+        {
+            "github": {
+                "api-key": token,
+                "build-report-repo": github_repository.full_name,
+            },
+            "distributions": ["host-fc37"],
+        },
+    )
+
+    # Patch Popen inside the module under test
+    popen_shim = _make_popen_shim(
+        tmpdir / "qubes-builder-github", tmp_home=tmpdir
+    )
+    monkeypatch.setattr(github_action.subprocess, "Popen", popen_shim)
+
+    # Run without --local-log-file to force make_with_log_qrexec
+    argv = [
+        str(PROJECT_PATH / "github-action.py"),
+        "--no-signer-github-command-check",
+        "build-component",
+        str(tmpdir / "qubes-builderv2"),
+        str(tmpdir / "builder.yml"),
+        "app-linux-split-gpg",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    github_action.main()
+
+    labels, comments = get_labels_and_comments(
+        "app-linux-split-gpg v2.0.60 (r4.2)", github_repository
+    )
+
+    # Expect build comments include build log link
+    joined = "\n".join(comments)
+    assert "/log_" in joined
+
+
+def test_action_component_build_qrexec_brokenpipe_includes_tail(
+    token, github_repository, workdir, monkeypatch
+):
+    tmpdir, env = workdir
+    github_action = _load_github_action_module(
+        env, tmpdir / "qubes-builder-github", monkeypatch
+    )
+
+    set_conf_options(
+        tmpdir / "builder.yml",
+        {
+            "github": {
+                "api-key": token,
+                "build-report-repo": github_repository.full_name,
+            },
+            "distributions": ["vm-bookworm"],
+        },
+    )
+
+    real_popen = subprocess.Popen
+
+    def popen_dead(args, *a, **kw):
+        if list(args[:3]) == [
+            "qrexec-client-vm",
+            "dom0",
+            "qubesbuilder.BuildLog",
+        ]:
+            # exits immediately -> writing logs to stdin triggers BrokenPipe
+            return real_popen(
+                [sys.executable, "-c", "import sys; sys.exit(0)"], *a, **kw
+            )
+        return real_popen(args, *a, **kw)
+
+    monkeypatch.setattr(github_action.subprocess, "Popen", popen_dead)
+
+    # Force a failure during build stages to trigger AutoActionError + tail
+    real_component_stage = github_action._component_stage
+
+    def fail_during_build(*args, **kwargs):
+        stages = kwargs.get("stages", [])
+        if "fetch" not in stages:
+            github_action.log.error("something went wrong")
+            github_action.log.error("traceback: boom bada boum")
+            raise RuntimeError("Injected failure")
+        return real_component_stage(*args, **kwargs)
+
+    monkeypatch.setattr(github_action, "_component_stage", fail_during_build)
+
+    argv = [
+        str(PROJECT_PATH / "github-action.py"),
+        "--no-signer-github-command-check",
+        "build-component",
+        str(tmpdir / "qubes-builderv2"),
+        str(tmpdir / "builder.yml"),
+        "app-linux-split-gpg",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+
+    github_action.main()
+
+    _, comments = get_labels_and_comments(
+        "app-linux-split-gpg v2.0.60 (r4.2)", github_repository
+    )
+    joined = "\n".join(comments)
+
+    # Tail must be present even though BuildLog process died
+    assert "Log tail" in joined or "Last 30 log lines" in joined
+    assert "something went wrong" in joined
+    assert "traceback: boom bada boum" in joined

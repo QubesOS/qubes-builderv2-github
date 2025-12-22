@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from github import Github
+from github import Github, Auth
 
 PROJECT_PATH = Path(__file__).resolve().parents[1]
 DEFAULT_BUILDER_CONF = PROJECT_PATH / "tests/builder.yml"
@@ -45,7 +45,7 @@ def token():
 
 @pytest.fixture(scope="session")
 def github_repository(token):
-    g = Github(token)
+    g = Github(auth=Auth.Token(token))
     user = g.get_user()
     if user.login != "fepitre2-bot":
         raise ValueError(f"Unexpected user '{user}'.")
@@ -62,9 +62,9 @@ def base_workdir(tmpdir_factory):
 
     env = os.environ.copy()
     # Enforce keyring location
-    env["GNUPGHOME"] = tmpdir / ".gnupg"
+    env["GNUPGHOME"] = str(tmpdir / ".gnupg")
     # We prevent rpm to find ~/.rpmmacros and put logs into workdir
-    env["HOME"] = tmpdir
+    env["HOME"] = str(tmpdir)
 
     yield tmpdir, env
 
@@ -119,11 +119,12 @@ executor:
     )
 
     # Enforce keyring location
-    env["GNUPGHOME"] = tmpdir / ".gnupg"
+    env["GNUPGHOME"] = str(tmpdir / ".gnupg")
     # Set PYTHONPATH with cloned qubes-builderv2
     env["PYTHONPATH"] = (
         f"{tmpdir / 'qubes-builderv2'!s}:{os.environ.get('PYTHONPATH','')}"
     )
+    env["PYTHONUNBUFFERED"] = "1"
 
     if env.get("CI_PROJECT_DIR", None):
         cache_dir = (Path(env["CI_PROJECT_DIR"]) / "cache").resolve()
