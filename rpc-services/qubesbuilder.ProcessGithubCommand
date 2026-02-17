@@ -26,6 +26,11 @@ keyring_path="$HOME/.config/qubes-builder-github/trusted-keys-for-commands.gpg"
 
 scripts_dir="/usr/local/lib/qubes-builder-github"
 
+# import new keys
+if [ "$scripts_dir/keys" -nt "$keyring_path" ]; then
+    sq keyring merge --overwrite --output "$keyring_path" "$keyring_path" "$scripts_dir/keys"/* ||:
+fi
+
 # shellcheck source=lib/functions.sh
 . "$scripts_dir/lib/functions.sh"
 
