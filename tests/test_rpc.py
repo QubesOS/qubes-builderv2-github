@@ -141,6 +141,22 @@ def generate_signed_build_template_command(env, timestamp=None):
     ).stdout
 
 
+def generate_signed_build_template_command_sequoia(env, timestamp=None):
+    if not timestamp:
+        timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M")
+    # this checks secret key presence, but also implictly starts gpg-agent, for sequoia to use
+    subprocess.run(["gpg2", "-K", TESTUSER_FPR], check=True, env=env)
+    return subprocess.run(
+        [
+            f"echo Build-template r4.2 debian-12-minimal {timestamp} | sq sign --cleartext --signer {TESTUSER_FPR}"
+        ],
+        shell=True,
+        check=True,
+        capture_output=True,
+        env=env,
+    ).stdout
+
+
 def generate_signed_upload_template_command(
     env, timestamp=None, repository="templates-itl"
 ):
@@ -194,6 +210,12 @@ def test_rpc_00_parse_command_upload_component(workdir):
 def test_rpc_01_parse_command_build_template(workdir):
     tmpdir, env = workdir
     signed_command = generate_signed_build_template_command(env)
+    _parse_command(tmpdir, env, signed_command)
+
+
+def test_rpc_01_parse_command_build_template_sequoia(workdir):
+    tmpdir, env = workdir
+    signed_command = generate_signed_build_template_command_sequoia(env)
     _parse_command(tmpdir, env, signed_command)
 
 
