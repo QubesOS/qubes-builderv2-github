@@ -141,14 +141,21 @@ def generate_signed_build_template_command(env, timestamp=None):
     ).stdout
 
 
-def generate_signed_build_template_command_sequoia(env, timestamp=None):
+def generate_signed_build_template_command_sequoia(env, tmpdir, timestamp=None):
     if not timestamp:
         timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M")
     # this checks secret key presence, but also implictly starts gpg-agent, for sequoia to use
     subprocess.run(["gpg2", "-K", TESTUSER_FPR], check=True, env=env)
+    # workaround https://gitlab.com/sequoia-pgp/sequoia-sq/-/issues/629
+    key_file = str(tmpdir / "signing.key")
+    subprocess.run(
+        ["gpg2", "--output", key_file, "--export-secret-key", TESTUSER_FPR],
+        check=True,
+        env=env,
+    )
     return subprocess.run(
         [
-            f"echo Build-template r4.2 debian-12-minimal {timestamp} | sq sign --cleartext --signer {TESTUSER_FPR}"
+            f"echo Build-template r4.2 debian-12-minimal {timestamp} | sq sign --cleartext --signer-file {key_file}"
         ],
         shell=True,
         check=True,
@@ -215,7 +222,7 @@ def test_rpc_01_parse_command_build_template(workdir):
 
 def test_rpc_01_parse_command_build_template_sequoia(workdir):
     tmpdir, env = workdir
-    signed_command = generate_signed_build_template_command_sequoia(env)
+    signed_command = generate_signed_build_template_command_sequoia(env, tmpdir)
     _parse_command(tmpdir, env, signed_command)
 
 
