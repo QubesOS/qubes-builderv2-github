@@ -266,7 +266,7 @@ def check_one_signature_packet(untrusted_binary_sig: bytes) -> bytes:
             len_bytes = 1
         elif untrusted_first_byte < 224:
             packet_length = (
-                ((untrusted_first_byte - 192) << 8) + untrusted_binary_sig[1] + 192
+                ((untrusted_first_byte - 192) << 8) + untrusted_binary_sig[2] + 192
             )
             len_bytes = 2
         elif untrusted_first_byte == 255:
@@ -390,8 +390,9 @@ def main(command_file, sig_file) -> None:
         raise BadCommandError("bad hash algorithm")
     hash_str = untrusted_input[41:47]
 
-    untrusted_command, untrusted_sig = untrusted_input[49:].split(b"\n", 1)
-    check_command(untrusted_command)
+    untrusted_command, untrusted_sig = untrusted_input[49:].split(b"\n-----", 1)
+    untrusted_sig = b"-----" + untrusted_sig
+    check_command(untrusted_command.rstrip(b"\n"))
 
     reconstructed_sig = canonicalize_sig(untrusted_sig, hash_str)
     with open(sig_file, "wb") as s, open(command_file, "wb") as c:
