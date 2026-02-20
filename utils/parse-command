@@ -266,7 +266,7 @@ def check_one_signature_packet(untrusted_binary_sig: bytes) -> bytes:
             len_bytes = 1
         elif untrusted_first_byte < 224:
             packet_length = (
-                ((untrusted_first_byte - 192) << 8) + untrusted_binary_sig[1] + 192
+                ((untrusted_first_byte - 192) << 8) + untrusted_binary_sig[2] + 192
             )
             len_bytes = 2
         elif untrusted_first_byte == 255:
