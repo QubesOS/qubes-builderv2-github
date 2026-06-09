@@ -119,6 +119,9 @@ def close_issue(issue_id, issue_no, repo=updates_repo):
 
 def main():
     args = parser.parse_args()
+    # for convenience allow passing full template package name in dists
+    if args.dists:
+        args.dists = [d.replace("qubes-template-", "") for d in args.dists]
 
     q = q_template.format(repo=updates_repo, pagination="first:100")
 
