@@ -58,23 +58,23 @@ parser.add_argument(
     default=5,
     help="ensure package at least this time in testing (default: %(default)d)",
 )
+parser.add_argument(
+    "--dists",
+    nargs="*",
+    default=[],
+    help="upload those dists/templates only",
+)
 parser.add_argument("release_name")
 parser.add_argument(
     "repo_name",
     help="target repo name, like 'current' or 'templates-itl'; list will include components applicable to the repo",
 )
-group = parser.add_mutually_exclusive_group(required=True)
+group = parser.add_mutually_exclusive_group(required=False)
 group.add_argument("--all", action="store_true", help="upload all matching components")
 group.add_argument(
     "--list", action="store_true", help="only list components, do not upload"
 )
 group.add_argument("--components", nargs="*", default=[])
-group.add_argument(
-    "--dists",
-    nargs="*",
-    default=[],
-    help="upload those dists only, applicable for uploading templates",
-)
 
 
 def graphql(query):
@@ -146,6 +146,38 @@ def main():
             r"`Upload [a-z0-9. -]* {}(?: vm-[a-z0-9+-]*)? repo`".format(args.repo_name),
             issue["body"],
         )
+        if match:
+            cmd = match.group(0).strip("`")
+            _, component, commit_id, release_name, repo_name, repo = cmd.split(" ", 5)
+            dist = "all"
+            if repo.startswith("vm-"):
+                dist = repo.split(" ")[0]
+            elif repo == "repo" and args.dists:
+                cmd = cmd.rsplit(" ", 1)[0] + " " + " ".join(args.dists) + " repo"
+        if not match:
+            match = re.search(
+                r"`Upload-component (r[0-9.]*) [a-z0-9. -]* {} all`".format(
+                    args.repo_name
+                ),
+                issue["body"],
+            )
+            if match:
+                cmd = match.group(0).strip("`")
+                _, release_name, component, commit_id, repo_name, dists = cmd.split(" ")
+                dist = "all"
+                if args.dists:
+                    cmd = cmd.rsplit(" ", 1)[0] + " " + ",".join(args.dists)
+            else:
+                match = re.search(
+                    r"`Upload-template (r[0-9.]*) [a-z0-9. -]* {}`".format(
+                        args.repo_name
+                    ),
+                    issue["body"],
+                )
+                if match:
+                    cmd = match.group(0).strip("`")
+                    component = "linux-template-builder"
+                    _, release_name, dist, version, repo_name = cmd.split(" ", 4)
         if not match:
             if args.verbose:
                 print(
@@ -154,17 +186,20 @@ def main():
                     )
                 )
             continue
-        cmd = match.group(0).strip("`")
-        _, component, commit_id, release_name, repo_name, repo = cmd.split(" ", 5)
-        dist = "all"
-        if repo.startswith("vm-"):
-            dist = repo.split(" ")[0]
         if release_name != args.release_name:
             continue
         days = (
             datetime.datetime.now()
             - datetime.datetime.strptime(issue["createdAt"], "%Y-%m-%dT%H:%M:%SZ")
         ).days
+        if (
+            args.dists
+            and component != "linux-template-builder"
+            and not any(
+                f"{release_name}-{dist}-cur-test" in labels for dist in args.dists
+            )
+        ):
+            continue
         if args.list:
             extra_info = ""
             thumb_up = len(list(r for r in reactions if r == "THUMBS_UP"))
@@ -190,11 +225,6 @@ def main():
                 or component in args.components
                 or (component == "linux-template-builder" and dist in args.dists)
             ):
-                if args.dists and component != "linux-template-builder":
-                    print(
-                        "ERROR: selective dists upload for non-templates not supported by this script"
-                    )
-                    sys.exit(1)
                 if "buggy" in labels:
                     print("WARNING: skipping buggy {} for {}".format(component, dist))
                     continue
