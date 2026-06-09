@@ -51,13 +51,13 @@ def graphql(query):
     return r.text
 
 
-def close_issue(issue_id, issue_no, repo=updates_repo):
+def close_issue(issue_id, issue_no, repo=updates_repo, reason="completed"):
     # Github API v4 lack closeIssue mutation
     # https://platform.github.community/t/add-closeissue-mutation/3250/3
 
     r = requests.patch(
         "https://api.github.com/repos/{}/issues/{}".format(repo, issue_no),
-        json={"state": "closed"},
+        json={"state": "closed", "state_reason": reason},
         auth=(),
     )
     if not r.ok:
@@ -170,7 +170,7 @@ def main():
                     comment_issue(
                         issue["id"], issue_no, "Superseded by #{}".format(latest_issue)
                     )
-                    close_issue(issue["id"], issue_no)
+                    close_issue(issue["id"], issue_no, reason="not_planned")
             else:
                 print(
                     "Update {} ({}) newer than {} ({}) lack {} labels".format(
