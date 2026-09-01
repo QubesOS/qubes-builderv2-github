@@ -14,7 +14,7 @@ If you're release manager, you can issue GPG-inline signed command:
 * `Upload-component @RELEASE_NAME@ @COMPONENT@ @COMMIT_SHA@ security-testing all`
 
 You can choose subset of distributions like:
-* `Upload-component @RELEASE_NAME@ @COMPONENT@ @COMMIT_SHA@ current vm-bookworm,vm-fc37` (available @MIN_AGE_DAYS@ days from now)
+* `Upload-component @RELEASE_NAME@ @COMPONENT@ @COMMIT_SHA@ current vm-trixie,vm-fc37` (available @MIN_AGE_DAYS@ days from now)
 
 Above commands will work only if packages in current-testing repository were built from given commit (i.e. no new version superseded it).
 

@@ -179,7 +179,7 @@ def test_notify_002_template_build_success_upload_failure(
     timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%s")
     template_name = "whonix-gateway-17"
     package_name = f"qubes-template-{template_name}-4.2.0-{timestamp}"
-    dist = make_distribution("vm-bookworm")
+    dist = make_distribution("vm-trixie")
     notify_cli = make_notify_cli(token, tmpdir, github_repository)
 
     #
@@ -491,7 +491,7 @@ If you're release manager, you can issue GPG-inline signed command:
 * `Upload-component r4.2 {package_name} a6ff3071aa650f6ae9639c07e133eb27cffd91df security-testing all`
 
 You can choose subset of distributions like:
-* `Upload-component r4.2 {package_name} a6ff3071aa650f6ae9639c07e133eb27cffd91df current vm-bookworm,vm-fc37` (available 5 days from now)
+* `Upload-component r4.2 {package_name} a6ff3071aa650f6ae9639c07e133eb27cffd91df current vm-trixie,vm-fc37` (available 5 days from now)
 
 Above commands will work only if packages in current-testing repository were built from given commit (i.e. no new version superseded it).
 

@@ -65,7 +65,7 @@ def _build_component_check(tmpdir):
 
     assert (
         tmpdir
-        / f"artifacts/components/app-linux-split-gpg/2.0.60-1/vm-bookworm/publish/debian.publish.yml"
+        / f"artifacts/components/app-linux-split-gpg/2.0.60-1/vm-trixie/publish/debian.publish.yml"
     ).exists()
 
     assert (
@@ -86,11 +86,11 @@ def _build_component_check_multi(tmpdir):
 
     assert (
         tmpdir
-        / f"artifacts/components/input-proxy/1.0.35-1/vm-bookworm/publish/debian.publish.yml"
+        / f"artifacts/components/input-proxy/1.0.35-1/vm-trixie/publish/debian.publish.yml"
     ).exists()
     assert (
         tmpdir
-        / f"artifacts/components/input-proxy-clone/1.0.36-1/vm-bookworm/publish/debian.publish.yml"
+        / f"artifacts/components/input-proxy-clone/1.0.36-1/vm-trixie/publish/debian.publish.yml"
     ).exists()
 
     assert (
@@ -111,7 +111,7 @@ def _build_component_check_noversion(tmpdir):
 
     assert (
         tmpdir
-        / f"artifacts/components/gui-common-noversion/4.2.4-1.1/vm-bookworm/publish/debian.publish.yml"
+        / f"artifacts/components/gui-common-noversion/4.2.4-1.1/vm-trixie/publish/debian.publish.yml"
     ).exists()
 
     assert (
@@ -146,13 +146,13 @@ def _fix_timestamp_artifacts_path(artifacts_path):
 
 
 def _fix_timestamp_repo(tmpdir):
-    for distribution in ["host-fc37", "vm-bookworm", "vm-fc38"]:
+    for distribution in ["host-fc37", "vm-trixie", "vm-fc38"]:
         if distribution == "host-fc37":
             artifacts_path = (
                 tmpdir
                 / f"artifacts/components/app-linux-split-gpg/2.0.60-1/{distribution}/publish/rpm_spec_gpg-split-dom0.spec.publish.yml"
             )
-        elif distribution == "vm-bookworm":
+        elif distribution == "vm-trixie":
             artifacts_path = (
                 tmpdir
                 / f"artifacts/components/app-linux-split-gpg/2.0.60-1/{distribution}/publish/debian.publish.yml"
@@ -241,47 +241,47 @@ def _upload_component_check(
         else:
             assert set(rpms) == set(packages)
 
-    # vm-bookworm
+    # vm-trixie
     repository_dir = tmpdir / "artifacts/repository-publish/deb/r4.2/vm"
     for codename in [
-        "bookworm-testing",
-        "bookworm-securitytesting",
-        "bookworm",
+        "trixie-testing",
+        "trixie-securitytesting",
+        "trixie",
     ]:
         packages = deb_packages_list(repository_dir, codename)
         expected_packages = [
-            f"{codename}|main|amd64: qubes-gpg-split 2.0.60-1+deb12u1",
-            f"{codename}|main|amd64: qubes-gpg-split-dbgsym 2.0.60-1+deb12u1",
-            f"{codename}|main|amd64: qubes-gpg-split-tests 2.0.60-1+deb12u1",
-            f"{codename}|main|source: qubes-gpg-split 2.0.60-1+deb12u1",
+            f"{codename}|main|amd64: qubes-gpg-split 2.0.60-1+deb13u1",
+            f"{codename}|main|amd64: qubes-gpg-split-dbgsym 2.0.60-1+deb13u1",
+            f"{codename}|main|amd64: qubes-gpg-split-tests 2.0.60-1+deb13u1",
+            f"{codename}|main|source: qubes-gpg-split 2.0.60-1+deb13u1",
         ]
         if "-testing" in codename and with_gui_common:
             expected_packages += [
-                f"{codename}|main|amd64: qubes-gui-common 4.2.4+deb12u1+devel1",
-                f"{codename}|main|source: qubes-gui-common 4.2.4+deb12u1+devel1",
+                f"{codename}|main|amd64: qubes-gui-common 4.2.4+deb13u1+devel1",
+                f"{codename}|main|source: qubes-gui-common 4.2.4+deb13u1+devel1",
             ]
         if "-testing" in codename and with_input_proxy:
             # default reprepro keeps only the latest version,
             # 1.0.35 won't be visible here
             expected_packages += [
-                f"{codename}|main|source: qubes-input-proxy 1.0.36-1+deb12u1",
-                f"{codename}|main|amd64: qubes-input-proxy-sender 1.0.36-1+deb12u1",
-                f"{codename}|main|amd64: qubes-input-proxy-sender-dbgsym 1.0.36-1+deb12u1",
-                f"{codename}|main|amd64: qubes-input-proxy-receiver 1.0.36-1+deb12u1",
-                f"{codename}|main|amd64: qubes-input-proxy-receiver-dbgsym 1.0.36-1+deb12u1",
+                f"{codename}|main|source: qubes-input-proxy 1.0.36-1+deb13u1",
+                f"{codename}|main|amd64: qubes-input-proxy-sender 1.0.36-1+deb13u1",
+                f"{codename}|main|amd64: qubes-input-proxy-sender-dbgsym 1.0.36-1+deb13u1",
+                f"{codename}|main|amd64: qubes-input-proxy-receiver 1.0.36-1+deb13u1",
+                f"{codename}|main|amd64: qubes-input-proxy-receiver-dbgsym 1.0.36-1+deb13u1",
             ]
         assert set(packages) == set(expected_packages)
 
 
 def _build_template_check(tmpdir):
     assert (
-        tmpdir / f"artifacts/templates/debian-12-minimal.publish.yml"
+        tmpdir / f"artifacts/templates/debian-13-minimal.publish.yml"
     ).exists()
 
 
 def _fix_template_timestamp_repo(tmpdir):
     artifacts_path = (
-        tmpdir / f"artifacts/templates/debian-12-minimal.publish.yml"
+        tmpdir / f"artifacts/templates/debian-13-minimal.publish.yml"
     )
     info = yaml.safe_load(artifacts_path.read())
     publish_timestamp = None
@@ -311,7 +311,7 @@ def _fix_template_timestamp_repo(tmpdir):
 def _upload_template_check(tmpdir, build_timestamp):
     # host-fc37
     rpms = [
-        f"qubes-template-debian-12-minimal-4.2.0-{build_timestamp}.noarch.rpm",
+        f"qubes-template-debian-13-minimal-4.2.0-{build_timestamp}.noarch.rpm",
     ]
     for repository in ["templates-itl-testing", "templates-itl"]:
         repository_dir = f"file://{tmpdir}/artifacts/repository-publish/rpm/r4.2/{repository}"
@@ -367,17 +367,17 @@ def test_action_component_build(token, github_repository, workdir):
     assert set(labels) == {
         "r4.2-host-cur-test",
         "r4.2-vm-fc38-cur-test",
-        "r4.2-vm-bookworm-cur-test",
+        "r4.2-vm-trixie-cur-test",
     }
 
     # Check that comments exist
     assert comments == {
         f"Package for host was built ([build log]({tmpdir / 'build-component.log'})).",
         f"Package for vm-fc38 was built ([build log]({tmpdir / 'build-component.log'})).",
-        f"Package for vm-bookworm was built ([build log]({tmpdir / 'build-component.log'})).",
+        f"Package for vm-trixie was built ([build log]({tmpdir / 'build-component.log'})).",
         "Package for host was uploaded to current-testing repository.",
         "Package for vm-fc38 was uploaded to current-testing repository.",
-        "Package for vm-bookworm was uploaded to current-testing repository.",
+        "Package for vm-trixie was uploaded to current-testing repository.",
     }
 
 
@@ -435,17 +435,17 @@ def test_action_component_build_noversion(token, github_repository, workdir):
     assert set(labels) == {
         "r4.2-host-cur-test",
         "r4.2-vm-fc38-cur-test",
-        "r4.2-vm-bookworm-cur-test",
+        "r4.2-vm-trixie-cur-test",
     }
 
     # Check that comments exist
     assert comments == {
         f"Package for host was built ([build log]({tmpdir / 'build-component.log'})).",
         f"Package for vm-fc38 was built ([build log]({tmpdir / 'build-component.log'})).",
-        f"Package for vm-bookworm was built ([build log]({tmpdir / 'build-component.log'})).",
+        f"Package for vm-trixie was built ([build log]({tmpdir / 'build-component.log'})).",
         "Package for host was uploaded to current-testing repository.",
         "Package for vm-fc38 was uploaded to current-testing repository.",
-        "Package for vm-bookworm was uploaded to current-testing repository.",
+        "Package for vm-trixie was uploaded to current-testing repository.",
     }
 
 
@@ -466,7 +466,7 @@ def test_action_component_upload(workdir):
         "c5316c91107b8930ab4dc3341bc75293139b5b84",
         "security-testing",
         "--distribution",
-        "vm-bookworm",
+        "vm-trixie",
     ]
     run_cmd(cmd, check=True, env=env, capture_output=True, text=True)
 
@@ -518,14 +518,14 @@ def test_action_template_build(token, github_repository, workdir):
         "build-template",
         f"{tmpdir}/qubes-builderv2",
         f"{tmpdir}/builder.yml",
-        "debian-12-minimal",
+        "debian-13-minimal",
         timestamp,
     ]
     run_cmd(cmd, check=True, env=env, capture_output=True, text=True)
     _build_template_check(tmpdir)
 
     labels, comments = get_labels_and_comments(
-        f"qubes-template-debian-12-minimal 4.2.0-{timestamp} (r4.2)",
+        f"qubes-template-debian-13-minimal 4.2.0-{timestamp} (r4.2)",
         github_repository,
     )
 
@@ -534,8 +534,8 @@ def test_action_template_build(token, github_repository, workdir):
 
     # Check that comments exist
     assert comments == {
-        f"Template debian-12-minimal-4.2.0-{timestamp} was built ([build log]({tmpdir / 'build-template.log'})).",
-        f"Template debian-12-minimal-4.2.0-{timestamp} was uploaded to templates-itl-testing repository.",
+        f"Template debian-13-minimal-4.2.0-{timestamp} was built ([build log]({tmpdir / 'build-template.log'})).",
+        f"Template debian-13-minimal-4.2.0-{timestamp} was uploaded to templates-itl-testing repository.",
     }
 
 
@@ -564,7 +564,7 @@ def test_action_template_upload(token, github_repository, workdir):
         "upload-template",
         f"{tmpdir}/qubes-builderv2",
         f"{tmpdir}/builder.yml",
-        "debian-12-minimal",
+        "debian-13-minimal",
         f"4.2.0-{build_timestamp}",
         "templates-itl",
     ]
@@ -572,7 +572,7 @@ def test_action_template_upload(token, github_repository, workdir):
     _upload_template_check(tmpdir, build_timestamp)
 
     labels, comments = get_labels_and_comments(
-        f"qubes-template-debian-12-minimal 4.2.0-{build_timestamp} (r4.2)",
+        f"qubes-template-debian-13-minimal 4.2.0-{build_timestamp} (r4.2)",
         github_repository,
     )
 
@@ -581,9 +581,9 @@ def test_action_template_upload(token, github_repository, workdir):
 
     # Check that comments exist
     assert comments == {
-        f"Template debian-12-minimal-4.2.0-{build_timestamp} was built ([build log]({tmpdir / 'build-template.log'})).",
-        f"Template debian-12-minimal-4.2.0-{build_timestamp} was uploaded to templates-itl-testing repository.",
-        f"Template debian-12-minimal-4.2.0-{build_timestamp} was uploaded to templates-itl repository.",
+        f"Template debian-13-minimal-4.2.0-{build_timestamp} was built ([build log]({tmpdir / 'build-template.log'})).",
+        f"Template debian-13-minimal-4.2.0-{build_timestamp} was uploaded to templates-itl-testing repository.",
+        f"Template debian-13-minimal-4.2.0-{build_timestamp} was uploaded to templates-itl repository.",
     }
 
 

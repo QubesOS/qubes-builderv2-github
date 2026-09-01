@@ -34,27 +34,40 @@ fi
 # shellcheck source=lib/functions.sh
 . "$scripts_dir/lib/functions.sh"
 
+# upload the command log so a failure is not lost in a local file
+upload_command_log() {
+    if [ -s "${log_basename}.log" ]; then
+        qrexec-client-vm dom0 qubesbuilder.BuildLog \
+            < "${log_basename}.log" >/dev/null 2>&1 || :
+    fi
+}
+
 command_signer=
 read_stdin_command_and_verify_signature "$scripts_dir" "$keyring_path" "${tmpdir:?}/command" command_signer
+
+# set only after signature verification: nothing is uploaded for unverified input
+# replaces the cleanup trap from functions.sh, so it must keep the tmpdir removal
+# shellcheck disable=SC2154
+trap 'rc=$?; rm -rf "$tmpdir"; [ "$rc" -eq 0 ] || upload_command_log' EXIT
 
 # shellcheck disable=SC2034
 read -r action args < "$tmpdir/command"
 
 case "$action" in
 #    Build-component)
-#        "$scripts_dir/github-command.py" dispatch --log-basename "${log_basename}" log_basename --signer-fpr "$command_signer" Build-component "$tmpdir/command"
+#        "$scripts_dir/github-command.py" dispatch --command-log "${log_basename}.log" --signer-fpr "$command_signer" Build-component "$tmpdir/command"
 #        ;;
     Upload-component)
-        "$scripts_dir/github-command.py" dispatch --log-basename "${log_basename}" --signer-fpr "$command_signer" Upload-component "$tmpdir/command"
+        "$scripts_dir/github-command.py" dispatch --command-log "${log_basename}.log" --signer-fpr "$command_signer" Upload-component "$tmpdir/command"
         ;;
     Build-template)
-        "$scripts_dir/github-command.py" dispatch --log-basename "${log_basename}" --signer-fpr "$command_signer" Build-template "$tmpdir/command"
+        "$scripts_dir/github-command.py" dispatch --command-log "${log_basename}.log" --signer-fpr "$command_signer" Build-template "$tmpdir/command"
         ;;
     Upload-template)
-        "$scripts_dir/github-command.py" dispatch --log-basename "${log_basename}" --signer-fpr "$command_signer" Upload-template "$tmpdir/command"
+        "$scripts_dir/github-command.py" dispatch --command-log "${log_basename}.log" --signer-fpr "$command_signer" Upload-template "$tmpdir/command"
         ;;
     Build-iso)
-        "$scripts_dir/github-command.py" dispatch --log-basename "${log_basename}" --signer-fpr "$command_signer" Build-iso "$tmpdir/command"
+        "$scripts_dir/github-command.py" dispatch --command-log "${log_basename}.log" --signer-fpr "$command_signer" Build-iso "$tmpdir/command"
         ;;
     *)
         echo "Unknown command $action" >&2

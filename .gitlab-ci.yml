@@ -30,7 +30,6 @@ mypy:
     - vm
   before_script:
     - sudo dnf install -y python3-mypy python3-pip python3-pathspec git
-    - sudo python3 -m pip install types-PyYAML types-python-dateutil
     - echo "Qubes Builder v2 branch '${CI_QUBES_BUILDER_BRANCH:-main}'"
     - git clone -b "${CI_QUBES_BUILDER_BRANCH:-main}" https://gitlab.com/QubesOS/qubes-builderv2.git
   script:
@@ -112,7 +111,10 @@ test-rpc-component:
 test-rpc-template:
   extends: .pytest
   variables:
-    PYTEST_TARGETS: "tests/test_rpc.py -k test_rpc_05"
+    PYTEST_TARGETS: >-
+      tests/test_rpc.py::test_rpc_05_build_template_command
+      tests/test_rpc.py::test_rpc_05_upload_template_command
+      tests/test_rpc.py::test_rpc_07_stale_timestamp_uploads_log
 
 test-rpc-iso:
   extends: .pytest
@@ -123,6 +125,11 @@ test-command:
   extends: .pytest
   variables:
     PYTEST_TARGETS: "tests/test_command.py"
+
+test-command-report:
+  extends: .pytest
+  variables:
+    PYTEST_TARGETS: "tests/test_command_report.py"
 
 test-notify:
   extends: .pytest

@@ -3,7 +3,11 @@ from pathlib import Path
 
 import yaml
 
-from conftest import load_action_module, make_config
+from conftest import (
+    load_action_module,
+    load_command_report_module,
+    make_config,
+)
 
 
 def test_format_additional_info_base_only(workdir, monkeypatch):
@@ -108,7 +112,7 @@ def test_action_template_build_timestamp_skip(workdir, monkeypatch):
     # Write a build artifact with a newer timestamp than what we'll request
     artifacts_templates = Path(str(tmpdir)) / "artifacts" / "templates"
     artifacts_templates.mkdir(parents=True, exist_ok=True)
-    ts_file = artifacts_templates / "debian-12-minimal.build.yml"
+    ts_file = artifacts_templates / "debian-13-minimal.build.yml"
     ts_file.write_text(
         yaml.dump({"timestamp": newer_ts.strftime("%Y%m%d%H%M")})
     )
@@ -118,7 +122,7 @@ def test_action_template_build_timestamp_skip(workdir, monkeypatch):
         cli = mod.AutoActionTemplate(
             builder_dir=tmpdir / "qubes-builderv2",
             config=config,
-            template_name="debian-12-minimal",
+            template_name="debian-13-minimal",
             template_timestamp=older_ts.strftime("%Y%m%d%H%M"),
             state_dir=tmpdir / "github-notify-state-ts-skip",
             commit_sha=None,
@@ -225,3 +229,15 @@ def test_action_component_build_skipped_already_released(workdir, monkeypatch):
     for result in action.results.values():
         assert result.status == "skipped"
         assert "current" in (result.reason or "")
+
+
+def test_report_parse_build_log_path_valid():
+    mod = load_command_report_module()
+    out = "test-vm/log_2026-01-01_00-00-00\n"
+    assert mod.parse_build_log_path(out) == "test-vm/log_2026-01-01_00-00-00"
+
+
+def test_report_parse_build_log_path_empty():
+    mod = load_command_report_module()
+    assert mod.parse_build_log_path("") is None
+    assert mod.parse_build_log_path("no log path here") is None

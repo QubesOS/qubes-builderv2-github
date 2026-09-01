@@ -5,6 +5,7 @@ import shutil
 import string
 import subprocess
 import sys
+import time
 from copy import deepcopy
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from github import Github, Auth
 
 PROJECT_PATH = Path(__file__).resolve().parents[1]
 DEFAULT_BUILDER_CONF = PROJECT_PATH / "tests/builder.yml"
+
+_keyboard_interrupted = False
+
+
+def pytest_keyboard_interrupt(excinfo):
+    global _keyboard_interrupted
+    _keyboard_interrupted = True
 
 
 # qubesbuilder/config
@@ -61,22 +69,6 @@ def load_qubesbuilder_module(tmpdir, name: str):
     return load_module(name, qb_root / (name.replace(".", "/") + ".py"))
 
 
-def make_distribution(distribution: str):
-    """
-    Return a QubesDistribution instance.
-    """
-    return sys.modules["qubesbuilder.distribution"].QubesDistribution(
-        distribution
-    )
-
-
-def make_config(builder_conf):
-    """
-    Return a Config instance.
-    """
-    return sys.modules["qubesbuilder.config"].Config(str(builder_conf))
-
-
 def load_action_module(env: dict, project_path: Path, monkeypatch):
     """
     Load githubbuilder/action.py as a fresh module instance with env applied.
@@ -92,6 +84,42 @@ def load_action_module(env: dict, project_path: Path, monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "githubbuilder.action", mod)
     return mod
+
+
+def load_notify_issues_module():
+    """
+    Load githubbuilder/notify_issues.py as a module object.
+    """
+    return load_module(
+        "githubbuilder.notify_issues",
+        PROJECT_PATH / "githubbuilder/notify_issues.py",
+    )
+
+
+def load_command_report_module():
+    """
+    Load githubbuilder/command_report.py as a module object.
+    """
+    return load_module(
+        "githubbuilder.command_report",
+        PROJECT_PATH / "githubbuilder/command_report.py",
+    )
+
+
+def make_distribution(distribution: str):
+    """
+    Return a QubesDistribution instance.
+    """
+    return sys.modules["qubesbuilder.distribution"].QubesDistribution(
+        distribution
+    )
+
+
+def make_config(builder_conf):
+    """
+    Return a Config instance.
+    """
+    return sys.modules["qubesbuilder.config"].Config(str(builder_conf))
 
 
 @pytest.fixture(scope="session")
@@ -110,8 +138,22 @@ def github_repository(token):
         raise ValueError(f"Unexpected user '{user}'.")
     repo_name = f"tests-{get_random_string(16)}"
     repo = user.create_repo(repo_name)
-    yield repo
-    repo.delete()
+    try:
+        yield repo
+    finally:
+        # optional inspection window before the repo goes away, skipped on
+        # keyboard interrupt
+        inspect_seconds = int(os.environ.get("TESTS_INSPECT_SECONDS", "0"))
+        if inspect_seconds > 0 and not _keyboard_interrupted:
+            print(
+                f"\nInspect {repo.html_url} (deleting in {inspect_seconds} seconds)",
+                flush=True,
+            )
+            try:
+                time.sleep(inspect_seconds)
+            except KeyboardInterrupt:
+                pass
+        repo.delete()
 
 
 @pytest.fixture(scope="session")
@@ -141,9 +183,7 @@ def workdir(base_workdir):
     # Copy builder.yml
     shutil.copy2(DEFAULT_BUILDER_CONF, tmpdir)
 
-    with open(f"{tmpdir}/builder.yml", "a") as f:
-        f.write(
-            f"""
+    extra_conf = f"""
 artifacts-dir: {tmpdir}/artifacts
 
 repository-upload-remote-host:
@@ -156,7 +196,8 @@ executor:
   options:
     dispvm: "builder-dvm"
 """
-        )
+    with open(f"{tmpdir}/builder.yml", "a") as f:
+        f.write(extra_conf)
 
     # Clone qubes-builderv2 (GitLab)
     run_cmd(
@@ -180,10 +221,7 @@ executor:
     # Load qubesbuilder and githubbuilder modules into sys.modules
     load_qubesbuilder_module(tmpdir, "qubesbuilder.distribution")
     load_qubesbuilder_module(tmpdir, "qubesbuilder.config")
-    load_module(
-        "githubbuilder.notify_issues",
-        PROJECT_PATH / "githubbuilder/notify_issues.py",
-    )
+    load_notify_issues_module()
 
     # Enforce keyring location
     env["GNUPGHOME"] = str(tmpdir / ".gnupg")
@@ -201,6 +239,30 @@ executor:
     yield tmpdir, env
 
 
+def make_fake_qrexec(bin_dir, capture_dir):
+    """
+    Create a fake qrexec-client-vm capturing its stdin and service name,
+    replying like qubesbuilder.BuildLog does.
+    """
+    bin_dir = Path(bin_dir)
+    capture_dir = Path(capture_dir)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    capture_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "qrexec-client-vm"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f'cat > "{capture_dir}/upload.$$"\n'
+        f'echo "$2" > "{capture_dir}/service.$$"\n'
+        'echo "test-vm/log_2026-01-01_00-00-00"\n'
+    )
+    fake.chmod(0o755)
+    return fake
+
+
+def get_fake_qrexec_uploads(capture_dir):
+    return sorted(Path(capture_dir).glob("upload.*"))
+
+
 def set_conf_options(builder_conf, options):
     with open(builder_conf, "r") as f:
         conf = yaml.safe_load(f.read())
@@ -213,13 +275,15 @@ def set_dry_run(builder_conf):
     set_conf_options(builder_conf, {"github": {"dry-run": True}})
 
 
-def get_issue(issue_title, repository):
-    issue = None
-    for i in repository.get_issues():
-        if i.title == issue_title:
-            issue = i
-            break
-    return issue
+def get_issue(issue_title, repository, retries=3, delay=5):
+    # the issues listing can lag behind a just-created issue
+    for attempt in range(retries):
+        if attempt:
+            time.sleep(delay)
+        for i in repository.get_issues():
+            if i.title == issue_title:
+                return i
+    return None
 
 
 def run_cmd(cmd, **kwargs):

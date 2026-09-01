@@ -34,6 +34,8 @@ top level key with settings:
 Optional:
 
   * `logs-repo` - repository in which every log are uploaded.
+  * `commands-repo` - repository in which command processing is reported,
+    see 'Command processing reports' below.
   * `iso-base-url` - public base URL where ISOs are uploaded (`iso` or `iso-testing` repositories). It is used only for comments.
   * `build-report-repo` - repository in which every build status package and template
     should have issue created (regardless of commenting issues mentioned in git log).
@@ -139,6 +141,19 @@ Parameters:
   
 Command needs to be signed with key for which public part is in
 `~/.config/qubes-builder-github/trusted-keys-for-commands.gpg` keyring.
+
+### Command processing reports ###
+
+Commands are reported as issues in a separate repository. This needs both `api-key` and `commands-repo` set in the `github` section. Each verified command gets one issue, titled with the command line itself. All builder instances share that issue, and a retried command reuses it. Each instance comments its result there. A comment shows the result in bold, then the release name and the path of the instance's builder configuration:
+
+ * `handled` - the command was processed
+ * `skipped` - this instance is not configured for the target (for example
+   an unknown template)
+ * `refused` - the signer is not allowed for the target
+ * `failed` - an error happened, the comment includes the end of the
+   command log
+
+Every service run also writes a local log into `~/builder-github-logs`. If dispatching fails before any instance ran (for example a timestamp outside the allowed range), this log is uploaded via the `qubesbuilder.BuildLog` RPC, like a build log. Nothing is ever reported for input that failed signature verification.
 
 Comments text
 =============

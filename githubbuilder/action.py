@@ -27,7 +27,6 @@
 
 import datetime
 import os
-import re
 import signal
 import subprocess
 from abc import abstractmethod, ABC
@@ -68,6 +67,7 @@ from qubesbuilder.component import ComponentError
 from qubesbuilder.pluginmanager import PluginManager
 
 from githubbuilder.notify_issues import NotifyIssueCli, NotifyIssueError
+from githubbuilder.command_report import parse_build_log_path
 
 # Root of the qubes-builder-github repository
 PROJECT_PATH = Path(__file__).resolve().parent.parent
@@ -134,25 +134,7 @@ def format_additional_info(
 
 
 def get_log_file_from_qubesbuilder_buildlog(stdout, logger=None):
-    if not stdout:
-        if logger:
-            logger.error(
-                "No output from qubesbuilder.BuildLog. Any policy RPC or LogVM issue?"
-            )
-        return None
-
-    for raw in stdout.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if re.fullmatch(r".*[\S\w.-]+/log_[\S\w.-]+", line):
-            return line
-
-    if logger:
-        logger.error(
-            "Cannot parse log file provided by qubesbuilder.BuildLog RPC."
-        )
-    return None
+    return parse_build_log_path(stdout, logger)
 
 
 def raise_timeout(signum, frame):

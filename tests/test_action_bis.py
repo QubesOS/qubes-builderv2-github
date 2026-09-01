@@ -211,7 +211,7 @@ def test_action_component_build_qrexec_brokenpipe_includes_tail(
                 "api-key": token,
                 "build-report-repo": github_repository.full_name,
             },
-            "distributions": ["vm-bookworm"],
+            "distributions": ["vm-trixie"],
         },
     )
 

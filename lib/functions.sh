@@ -8,9 +8,12 @@
 config_file="$HOME/.config/qubes-builder-github/builders.list"
 
 # don't return anything; log it locally, just in case
-mkdir -p "$HOME/builder-github-logs"
-log_basename="$HOME/builder-github-logs/$(date +%s)-$$"
-exec >>"${log_basename}.log" 2>&1
+# keep the log already set up by the sourcing script, if any
+if [ -z "${log_basename:-}" ]; then
+    mkdir -p "$HOME/builder-github-logs"
+    log_basename="$HOME/builder-github-logs/$(date +%s)-$$"
+    exec >>"${log_basename}.log" 2>&1
+fi
 
 tmpdir=$(mktemp -d)
 # setup cleanup

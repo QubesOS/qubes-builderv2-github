@@ -1,8 +1,9 @@
 import datetime
 import os
 import subprocess
+from pathlib import Path
 
-from conftest import run_cmd
+from conftest import run_cmd, make_fake_qrexec, get_fake_qrexec_uploads
 from test_action import (
     _build_component_check,
     _upload_component_check,
@@ -128,12 +129,14 @@ def generate_signed_upload_component_command(
     ).stdout
 
 
-def generate_signed_build_template_command(env, timestamp=None):
+def generate_signed_build_template_command(
+    env, timestamp=None, template="debian-13-minimal", release="r4.2"
+):
     if not timestamp:
         timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M")
     return run_cmd(
         [
-            f"echo Build-template r4.2 debian-12-minimal {timestamp} | gpg2 --clearsign -u {TESTUSER_FPR}"
+            f"echo Build-template {release} {template} {timestamp} | gpg2 --clearsign -u {TESTUSER_FPR}"
         ],
         shell=True,
         check=True,
@@ -156,7 +159,7 @@ def generate_signed_build_template_command_sequoia(env, tmpdir, timestamp=None):
     )
     return subprocess.run(
         [
-            f"echo Build-template r4.2 debian-12-minimal {timestamp} | sq sign --cleartext --signer-file {key_file}"
+            f"echo Build-template r4.2 debian-13-minimal {timestamp} | sq sign --cleartext --signer-file {key_file}"
         ],
         shell=True,
         check=True,
@@ -172,7 +175,7 @@ def generate_signed_upload_template_command(
         timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M")
     return run_cmd(
         [
-            f"echo Upload-template r4.2 debian-12-minimal 4.2.0-{timestamp} {repository} | gpg2 --clearsign -u {TESTUSER_FPR}"
+            f"echo Upload-template r4.2 debian-13-minimal 4.2.0-{timestamp} {repository} | gpg2 --clearsign -u {TESTUSER_FPR}"
         ],
         shell=True,
         check=True,
@@ -273,7 +276,7 @@ def test_rpc_04_upload_component_command(workdir):
 
     # create signed upload command for 'security-testing' repository
     signed_command = generate_signed_upload_component_command(
-        env, repository="security-testing", dist="vm-bookworm"
+        env, repository="security-testing", dist="vm-trixie"
     )
     run_cmd(
         [
@@ -419,3 +422,84 @@ def test_rpc_06_build_iso_command(workdir):
 
     # check everything is in repositories as expected
     _build_iso_check(tmpdir, timestamp)
+
+
+def test_rpc_07_stale_timestamp_uploads_log(workdir):
+    tmpdir, env = workdir
+
+    # Create builder list
+    create_builders_list(tmpdir)
+
+    # Adapt RPC for tests
+    fix_scripts_dir(tmpdir, logfile=str(tmpdir / "stale-command.log"), env=env)
+
+    capture_dir = Path(tmpdir) / "captures-rpc-stale"
+    make_fake_qrexec(Path(tmpdir) / "fake-bin", capture_dir)
+    env = env.copy()
+    env["PATH"] = f"{tmpdir}/fake-bin:{env['PATH']}"
+
+    stale = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2)
+    ).strftime("%Y%m%d%H%M")
+    signed_command = generate_signed_build_template_command(
+        env, timestamp=stale, template="whonix-gateway-18", release="r4.3"
+    )
+
+    result = subprocess.run(
+        [
+            str(
+                tmpdir
+                / "qubes-builder-github/rpc-services/qubesbuilder.ProcessGithubCommand"
+            )
+        ],
+        input=signed_command,
+        capture_output=True,
+        env=env,
+    )
+    assert result.returncode != 0
+
+    uploads = get_fake_qrexec_uploads(capture_dir)
+    assert len(uploads) == 1
+    assert "Timestamp outside of allowed range" in uploads[0].read_text()
+    services = sorted(capture_dir.glob("service.*"))
+    assert services[0].read_text().strip() == "qubesbuilder.BuildLog"
+
+
+def test_rpc_08_bad_signature_uploads_nothing(workdir):
+    tmpdir, env = workdir
+
+    # Create builder list
+    create_builders_list(tmpdir)
+
+    # Adapt RPC for tests
+    fix_scripts_dir(
+        tmpdir, logfile=str(tmpdir / "bad-sig-command.log"), env=env
+    )
+
+    capture_dir = Path(tmpdir) / "captures-rpc-bad-sig"
+    make_fake_qrexec(Path(tmpdir) / "fake-bin", capture_dir)
+    env = env.copy()
+    env["PATH"] = f"{tmpdir}/fake-bin:{env['PATH']}"
+
+    signed_command = generate_signed_build_template_command(env, release="r4.3")
+    # tamper with the signed payload to invalidate the signature
+    tampered_command = signed_command.replace(
+        b"debian-13-minimal", b"debian-14-minimal"
+    )
+    assert tampered_command != signed_command
+
+    result = subprocess.run(
+        [
+            str(
+                tmpdir
+                / "qubes-builder-github/rpc-services/qubesbuilder.ProcessGithubCommand"
+            )
+        ],
+        input=tampered_command,
+        capture_output=True,
+        env=env,
+    )
+    assert result.returncode != 0
+
+    # nothing may be reported for unverified input
+    assert get_fake_qrexec_uploads(capture_dir) == []
